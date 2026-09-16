@@ -353,7 +353,7 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const canManageObras = profile.papel === "compras";
-  const canUpdateStatus = profile.papel === "compras";
+  const canUpdateStatus = profile.papel === "compras" || profile.papel === "obra";
   const canCreatePedido = profile.papel === "compras" || profile.papel === "obra";
   const canManageUsers = profile.papel === "compras" || profile.papel === "dono";
 
@@ -1293,7 +1293,7 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
                 className={"step" + (i < currentIndex ? " done" : "") + (i === currentIndex ? " active" : "") + (stepperTravado ? " locked" : "")}
                 disabled={stepperTravado}
                 onClick={() => onUpdateStatus(s)}
-                title={stepperTravado ? (pedido.cancelado ? "Reabra o pedido para alterar o status" : "Apenas o setor de compras pode atualizar") : `Marcar como "${s}"`}
+                title={stepperTravado ? (pedido.cancelado ? "Reabra o pedido para alterar o status" : "Apenas o setor de compras ou a equipe de obra podem atualizar") : `Marcar como "${s}"`}
               >
                 <span className="step-dot">{i < currentIndex ? <Check size={12} /> : i + 1}</span>
                 <span className="step-label">{s}</span>
@@ -1302,7 +1302,7 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
             </div>
           ))}
         </div>
-        {!canUpdateStatus && !pedido.cancelado && <p className="stepper-hint">Apenas o setor de compras pode atualizar o status. Você recebe um aviso a cada mudança.</p>}
+        {!canUpdateStatus && !pedido.cancelado && <p className="stepper-hint">Apenas o setor de compras ou a equipe de obra podem atualizar o status. Você recebe um aviso a cada mudança.</p>}
 
         <div className="comentarios-block">
           <span className="detail-label">Comentários</span>
