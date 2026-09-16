@@ -46,8 +46,10 @@ function formatDate(iso) {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 }
+const STATUS_JA_COMPRADO = ["Comprado", "Em Rota de Entrega", "Entregue"];
+
 function isAtrasado(p) {
-  if (p.status === "Entregue" || p.cancelado) return false;
+  if (STATUS_JA_COMPRADO.includes(p.status) || p.cancelado) return false;
   if (!p.dataNecessidade) return false;
   return p.dataNecessidade < todayISO();
 }
@@ -514,7 +516,9 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
 
   const pedidosCountByObra = useMemo(() => {
     const map = {};
-    pedidos.forEach((p) => { map[p.obraId] = (map[p.obraId] || 0) + 1; });
+    pedidos
+      .filter((p) => !p.cancelado && !STATUS_JA_COMPRADO.includes(p.status))
+      .forEach((p) => { map[p.obraId] = (map[p.obraId] || 0) + 1; });
     return map;
   }, [pedidos]);
 
