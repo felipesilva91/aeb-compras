@@ -52,14 +52,27 @@ const CAMEL_TO_SNAKE = {
 };
 const SNAKE_TO_CAMEL = Object.fromEntries(Object.entries(CAMEL_TO_SNAKE).map(([k, v]) => [v, k]));
 
-function toRow(obj) {
+function toRow(table, obj) {
   const row = {};
-  for (const [k, v] of Object.entries(obj)) row[CAMEL_TO_SNAKE[k] || k] = v;
+  for (const [k, v] of Object.entries(obj)) {
+    if (table === "notifications" && k === "timestamp") {
+      row.created_at = new Date(v || Date.now()).toISOString();
+      continue;
+    }
+    if (k === "createdAt") continue; // gerado pelo próprio banco (now()) — nunca reenviamos
+    row[CAMEL_TO_SNAKE[k] || k] = v;
+  }
   return row;
 }
-function fromRow(row) {
+function fromRow(table, row) {
   const obj = {};
-  for (const [k, v] of Object.entries(row)) obj[SNAKE_TO_CAMEL[k] || k] = v;
+  for (const [k, v] of Object.entries(row)) {
+    if (table === "notifications" && k === "created_at") {
+      obj.timestamp = v ? new Date(v).getTime() : Date.now();
+      continue;
+    }
+    obj[SNAKE_TO_CAMEL[k] || k] = v;
+  }
   if (obj.createdAt) obj.createdAt = new Date(obj.createdAt).getTime();
   return obj;
 }
@@ -71,7 +84,7 @@ export async function storageGet(key, shared = false) {
   try {
     const { data, error } = await supabase.from(key).select("*");
     if (error) throw error;
-    return (data || []).map(fromRow);
+    return (data || []).map((row) => fromRow(key, row));
   } catch (e) {
     console.error("storageGet (supabase) erro em", key, e);
     return null;
@@ -84,7 +97,7 @@ export async function storageGet(key, shared = false) {
 export async function storageSet(key, value, shared = false) {
   if (!shared) return setPersonal(key, value);
   try {
-    const rows = (value || []).map(toRow);
+    const rows = (value || []).map((obj) => toRow(key, obj));
     if (rows.length > 0) {
       const { error } = await supabase.from(key).insert(rows);
       if (error) throw error;
@@ -99,12 +112,12 @@ export async function storageSet(key, value, shared = false) {
 // ---------- Operações linha a linha (o jeito certo de salvar) ----------
 
 export async function dbInsert(table, obj) {
-  const { error } = await supabase.from(table).insert(toRow(obj));
+  const { error } = await supabase.from(table).insert(toRow(table, obj));
   if (error) throw error;
 }
 
 export async function dbUpdate(table, id, patch) {
-  const { error } = await supabase.from(table).update(toRow(patch)).eq("id", id);
+  const { error } = await supabase.from(table).update(toRow(table, patch)).eq("id", id);
   if (error) throw error;
 }
 
