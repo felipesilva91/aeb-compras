@@ -9,7 +9,7 @@ import {
 /* ============================== STORAGE HELPERS ============================== */
 // localStorage hoje; troque src/lib/storage.js por uma versao Supabase quando estiver pronta.
 
-import { storageGet as safeGet, storageSet as safeSet, uploadFotoPedido } from "./lib/storage";
+import { storageGet as safeGet, storageSet as safeSet, uploadFotoPedido, dbInsert, dbUpdate, dbDelete, dbDeleteBy, dbMarkAllRead } from "./lib/storage";
 
 /* ============================== CONSTANTS ============================== */
 
@@ -180,9 +180,13 @@ export default function App() {
     return () => clearInterval(pollRef.current);
   }, [loadShared]);
 
-  async function persistUsuarios(next) {
-    setUsuarios(next);
-    await safeSet("usuarios", next, true);
+  async function atualizarUsuario(id, patch) {
+    await dbUpdate("usuarios", id, patch);
+    setUsuarios((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+  }
+  async function adicionarUsuario(novo) {
+    await dbInsert("usuarios", novo);
+    setUsuarios((prev) => [...prev, novo]);
   }
 
   async function handleLogin(userId) {
@@ -207,7 +211,7 @@ export default function App() {
   if (!profile) {
     return (
       <div className="aeb-root">
-        <LoginFlow usuarios={usuarios} onPersistUsuarios={persistUsuarios} onLogin={handleLogin} />
+        <LoginFlow usuarios={usuarios} onUpdateUsuario={atualizarUsuario} onLogin={handleLogin} />
       </div>
     );
   }
@@ -223,7 +227,8 @@ export default function App() {
         setObras={setObras}
         setPedidos={setPedidos}
         setNotifications={setNotifications}
-        onPersistUsuarios={persistUsuarios}
+        onUpdateUsuario={atualizarUsuario}
+        onAddUsuario={adicionarUsuario}
         onRefresh={loadShared}
         onLogout={handleLogout}
       />
@@ -249,7 +254,7 @@ function BrandBackdrop() {
 
 /* ============================== LOGIN FLOW ============================== */
 
-function LoginFlow({ usuarios, onPersistUsuarios, onLogin }) {
+function LoginFlow({ usuarios, onUpdateUsuario, onLogin }) {
   const [step, setStep] = useState("pick");
   const [selected, setSelected] = useState(null);
   const [senha, setSenha] = useState("");
@@ -281,8 +286,7 @@ function LoginFlow({ usuarios, onPersistUsuarios, onLogin }) {
   async function submitReset() {
     if (novaSenha.length < 4) { setResetErro("Use pelo menos 4 caracteres."); return; }
     if (novaSenha !== confirmaSenha) { setResetErro("As senhas não coincidem."); return; }
-    const next = usuarios.map((u) => (u.id === selected.id ? { ...u, senha: novaSenha, mustReset: false } : u));
-    await onPersistUsuarios(next);
+    await onUpdateUsuario(selected.id, { senha: novaSenha, mustReset: false });
     onLogin(selected.id);
   }
 
@@ -379,7 +383,7 @@ function LoginFlow({ usuarios, onPersistUsuarios, onLogin }) {
 
 /* ============================== WORKSPACE ============================== */
 
-function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras, setPedidos, setNotifications, onPersistUsuarios, onRefresh, onLogout }) {
+function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras, setPedidos, setNotifications, onUpdateUsuario, onAddUsuario, onRefresh, onLogout }) {
   const [view, setView] = useState({ type: "dashboard" });
   const [dashFilter, setDashFilter] = useState(null);
   const [modal, setModal] = useState(null);
@@ -400,14 +404,16 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
   const unreadCount = myNotifs.filter((n) => !n.read).length;
   const obraById = useCallback((id) => obras.find((o) => o.id === id), [obras]);
 
-  async function persistObras(next) { setObras(next); setSaving(true); await safeSet("obras", next, true); setSaving(false); }
-  async function persistPedidos(next) { setPedidos(next); setSaving(true); await safeSet("pedidos", next, true); setSaving(false); }
-  async function persistNotifications(next) { setNotifications(next); await safeSet("notifications", next, true); }
-
   async function createObra({ nome, cliente, endereco, responsavelCompras, perfilCliente }) {
     const codigo = `OBRA-${String(obras.length + 1).padStart(3, "0")}`;
     const nova = { id: uid(), codigo, nome, cliente, endereco, responsavelCompras: responsavelCompras || null, perfilCliente: perfilCliente || null, createdAt: Date.now() };
-    await persistObras([...obras, nova]);
+    setSaving(true);
+    try {
+      await dbInsert("obras", nova);
+      setObras([...obras, nova]);
+    } finally {
+      setSaving(false);
+    }
     setModal(null);
     setView({ type: "obra", id: nova.id });
   }
@@ -420,96 +426,122 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
       lancadoPor: profile.nome, createdAt: Date.now(),
       justificativaUrgencia: prazoEhUrgente(dataNecessidade) ? (justificativaUrgencia || "").trim() : null,
       historico: [{ status: "Lançado", em: Date.now(), por: profile.nome }],
-      comentarios: [],
+      comentarios: [], cancelado: false, pendente: false, motivoPendencia: null,
     };
-    await persistPedidos([...pedidos, novo]);
+    setSaving(true);
+    try {
+      await dbInsert("pedidos", novo);
+      setPedidos([...pedidos, novo]);
+    } finally {
+      setSaving(false);
+    }
     setModal(null);
   }
-
 
   async function updateStatus(pedidoId, novoStatus) {
     const pedido = pedidos.find((p) => p.id === pedidoId);
     if (!pedido || pedido.status === novoStatus) return;
-    const next = pedidos.map((p) =>
-      p.id === pedidoId
-        ? { ...p, status: novoStatus, historico: [...(p.historico || []), { status: novoStatus, em: Date.now(), por: profile.nome }] }
-        : p
-    );
-    await persistPedidos(next);
+    const historico = [...(pedido.historico || []), { status: novoStatus, em: Date.now(), por: profile.nome }];
+    setSaving(true);
+    try {
+      await dbUpdate("pedidos", pedidoId, { status: novoStatus, historico });
+      setPedidos(pedidos.map((p) => (p.id === pedidoId ? { ...p, status: novoStatus, historico } : p)));
+    } finally {
+      setSaving(false);
+    }
     const obraDoPedido = obraById(pedido.obraId);
     const notif = {
       id: uid(), userName: pedido.lancadoPor, pedidoId, obraId: pedido.obraId,
       message: `${pedido.titulo} — obra ${obraDoPedido?.nome || "—"}: ${novoStatus}`,
       timestamp: Date.now(), read: false,
     };
-    await persistNotifications([...notifications, notif]);
+    try {
+      await dbInsert("notifications", notif);
+      setNotifications([...notifications, notif]);
+    } catch (e) {
+      console.error("Falha ao criar notificação", e);
+    }
   }
 
   async function markAllRead() {
-    const next = notifications.map((n) => (n.userName === profile.nome ? { ...n, read: true } : n));
-    await persistNotifications(next);
+    try {
+      await dbMarkAllRead(profile.nome);
+      setNotifications(notifications.map((n) => (n.userName === profile.nome ? { ...n, read: true } : n)));
+    } catch (e) {
+      console.error("Falha ao marcar notificações como lidas", e);
+    }
   }
 
   async function resetUserPassword(userId) {
-    const next = usuarios.map((u) => (u.id === userId ? { ...u, senha: DEFAULT_PASSWORD, mustReset: true } : u));
-    await onPersistUsuarios(next);
+    await onUpdateUsuario(userId, { senha: DEFAULT_PASSWORD, mustReset: true });
   }
   async function addUser({ nome, papel }) {
     const novo = { id: uid(), nome, papel, senha: DEFAULT_PASSWORD, mustReset: true };
-    await onPersistUsuarios([...usuarios, novo]);
+    await onAddUsuario(novo);
   }
 
   async function changeOwnPassword(senhaAtual, novaSenha) {
     if (senhaAtual !== profile.senha) return { ok: false, erro: "Senha atual incorreta." };
-    const next = usuarios.map((u) => (u.id === profile.id ? { ...u, senha: novaSenha, mustReset: false } : u));
-    await onPersistUsuarios(next);
+    await onUpdateUsuario(profile.id, { senha: novaSenha, mustReset: false });
     return { ok: true };
   }
 
   async function updateObra(obraId, { nome, cliente, endereco, responsavelCompras, perfilCliente }) {
-    const next = obras.map((o) => (o.id === obraId ? { ...o, nome, cliente, endereco, responsavelCompras: responsavelCompras || null, perfilCliente: perfilCliente || null } : o));
-    await persistObras(next);
+    const patch = { nome, cliente, endereco, responsavelCompras: responsavelCompras || null, perfilCliente: perfilCliente || null };
+    setSaving(true);
+    try {
+      await dbUpdate("obras", obraId, patch);
+      setObras(obras.map((o) => (o.id === obraId ? { ...o, ...patch } : o)));
+    } finally {
+      setSaving(false);
+    }
     setModal(null);
   }
 
   async function updatePedido(pedidoId, { titulo, material, dataNecessidade, prioridade, fotoUrl, justificativaUrgencia }) {
-    const next = pedidos.map((p) =>
-      p.id === pedidoId
-        ? {
-            ...p, titulo, material, dataNecessidade, prioridade, fotoUrl: fotoUrl ?? p.fotoUrl,
-            justificativaUrgencia: prazoEhUrgente(dataNecessidade) ? (justificativaUrgencia || "").trim() : null,
-            historico: [...(p.historico || []), { status: "Dados do pedido atualizados", em: Date.now(), por: profile.nome }],
-          }
-        : p
-    );
-    await persistPedidos(next);
+    const pedido = pedidos.find((p) => p.id === pedidoId);
+    if (!pedido) return;
+    const historico = [...(pedido.historico || []), { status: "Dados do pedido atualizados", em: Date.now(), por: profile.nome }];
+    const patch = {
+      titulo, material, dataNecessidade, prioridade, fotoUrl: fotoUrl ?? pedido.fotoUrl,
+      justificativaUrgencia: prazoEhUrgente(dataNecessidade) ? (justificativaUrgencia || "").trim() : null,
+      historico,
+    };
+    setSaving(true);
+    try {
+      await dbUpdate("pedidos", pedidoId, patch);
+      setPedidos(pedidos.map((p) => (p.id === pedidoId ? { ...p, ...patch } : p)));
+    } finally {
+      setSaving(false);
+    }
     setModal(null);
   }
 
   async function setPedidoCancelado(pedidoId, cancelado) {
-    const next = pedidos.map((p) =>
-      p.id === pedidoId
-        ? {
-            ...p, cancelado,
-            historico: [...(p.historico || []), { status: cancelado ? "Pedido cancelado" : "Pedido reaberto", em: Date.now(), por: profile.nome }],
-          }
-        : p
-    );
-    await persistPedidos(next);
+    const pedido = pedidos.find((p) => p.id === pedidoId);
+    if (!pedido) return;
+    const historico = [...(pedido.historico || []), { status: cancelado ? "Pedido cancelado" : "Pedido reaberto", em: Date.now(), por: profile.nome }];
+    setSaving(true);
+    try {
+      await dbUpdate("pedidos", pedidoId, { cancelado, historico });
+      setPedidos(pedidos.map((p) => (p.id === pedidoId ? { ...p, cancelado, historico } : p)));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function setPedidoPendente(pedidoId, pendente, motivo) {
     const pedido = pedidos.find((p) => p.id === pedidoId);
     if (!pedido) return;
-    const next = pedidos.map((p) =>
-      p.id === pedidoId
-        ? {
-            ...p, pendente, motivoPendencia: pendente ? motivo.trim() : null,
-            historico: [...(p.historico || []), { status: pendente ? `Pedido marcado como pendência: ${motivo.trim()}` : "Pendência resolvida", em: Date.now(), por: profile.nome }],
-          }
-        : p
-    );
-    await persistPedidos(next);
+    const motivoPendencia = pendente ? motivo.trim() : null;
+    const historico = [...(pedido.historico || []), { status: pendente ? `Pedido marcado como pendência: ${motivo.trim()}` : "Pendência resolvida", em: Date.now(), por: profile.nome }];
+    setSaving(true);
+    try {
+      await dbUpdate("pedidos", pedidoId, { pendente, motivoPendencia, historico });
+      setPedidos(pedidos.map((p) => (p.id === pedidoId ? { ...p, pendente, motivoPendencia, historico } : p)));
+    } finally {
+      setSaving(false);
+    }
 
     if (pedido.lancadoPor !== profile.nome) {
       const obraDoPedido = obraById(pedido.obraId);
@@ -520,13 +552,25 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
           : `${pedido.titulo} — obra ${obraDoPedido?.nome || "—"}: pendência resolvida`,
         timestamp: Date.now(), read: false,
       };
-      await persistNotifications([...notifications, notif]);
+      try {
+        await dbInsert("notifications", notif);
+        setNotifications([...notifications, notif]);
+      } catch (e) {
+        console.error("Falha ao criar notificação", e);
+      }
     }
   }
 
   async function deletePedido(pedidoId) {
-    await persistPedidos(pedidos.filter((p) => p.id !== pedidoId));
-    await persistNotifications(notifications.filter((n) => n.pedidoId !== pedidoId));
+    setSaving(true);
+    try {
+      await dbDeleteBy("notifications", "pedido_id", pedidoId);
+      await dbDelete("pedidos", pedidoId);
+      setPedidos(pedidos.filter((p) => p.id !== pedidoId));
+      setNotifications(notifications.filter((n) => n.pedidoId !== pedidoId));
+    } finally {
+      setSaving(false);
+    }
     setModal(null);
   }
 
@@ -534,8 +578,14 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
     const pedido = pedidos.find((p) => p.id === pedidoId);
     if (!pedido) return;
     const comentario = { id: uid(), texto, por: profile.nome, em: Date.now() };
-    const next = pedidos.map((p) => (p.id === pedidoId ? { ...p, comentarios: [...(p.comentarios || []), comentario] } : p));
-    await persistPedidos(next);
+    const comentarios = [...(pedido.comentarios || []), comentario];
+    setSaving(true);
+    try {
+      await dbUpdate("pedidos", pedidoId, { comentarios });
+      setPedidos(pedidos.map((p) => (p.id === pedidoId ? { ...p, comentarios } : p)));
+    } finally {
+      setSaving(false);
+    }
 
     const obraDoPedido = obraById(pedido.obraId);
     const destinatarios = new Set();
@@ -548,7 +598,12 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
         message: `${profile.nome} comentou em "${pedido.titulo}" — obra ${obraDoPedido?.nome || "—"}`,
         timestamp: Date.now(), read: false,
       }));
-      await persistNotifications([...notifications, ...novasNotifs]);
+      try {
+        for (const n of novasNotifs) await dbInsert("notifications", n);
+        setNotifications([...notifications, ...novasNotifs]);
+      } catch (e) {
+        console.error("Falha ao criar notificações", e);
+      }
     }
   }
 

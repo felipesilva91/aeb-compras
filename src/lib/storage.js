@@ -1,10 +1,10 @@
 // ============================================================
 // Camada de armazenamento do app — versão Supabase.
 //
-// O resto do app (App.jsx) só chama storageGet/storageSet com
-// uma "chave" (usuarios, obras, pedidos, notifications) e não
-// sabe nada sobre banco de dados — essa é a única peça que
-// entende Postgres/Supabase.
+// Cada ação (criar, editar, apagar um item) mexe SÓ na linha
+// daquele item específico no banco — nunca manda a lista inteira
+// de volta. Isso evita que uma tela desatualizada de uma pessoa
+// apague, sem querer, algo que outra pessoa acabou de criar.
 //
 // "shared: true"  -> vai pro banco de verdade (todo mundo vê).
 // "shared: false" -> fica só no navegador deste computador
@@ -37,92 +37,94 @@ function setPersonal(key, value) {
 }
 
 // Conversão entre o formato usado no app (camelCase) e as
-// colunas das tabelas no Postgres (snake_case), tabela por tabela.
-const TABLES = {
-  usuarios: {
-    toRow: (u) => ({ id: u.id, nome: u.nome, papel: u.papel, senha: u.senha, must_reset: !!u.mustReset }),
-    fromRow: (r) => ({ id: r.id, nome: r.nome, papel: r.papel, senha: r.senha, mustReset: !!r.must_reset }),
-  },
-  obras: {
-    toRow: (o) => ({ id: o.id, codigo: o.codigo, nome: o.nome, cliente: o.cliente || null, endereco: o.endereco || null, responsavel_compras: o.responsavelCompras || null, perfil_cliente: o.perfilCliente || null }),
-    fromRow: (r) => ({
-      id: r.id, codigo: r.codigo, nome: r.nome, cliente: r.cliente, endereco: r.endereco,
-      responsavelCompras: r.responsavel_compras, perfilCliente: r.perfil_cliente,
-      createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
-    }),
-  },
-  pedidos: {
-    toRow: (p) => ({
-      id: p.id, codigo: p.codigo, obra_id: p.obraId, titulo: p.titulo, material: p.material,
-      foto_url: p.fotoUrl || null, data_lancamento: p.dataLancamento, data_necessidade: p.dataNecessidade,
-      prioridade: p.prioridade, status: p.status, lancado_por: p.lancadoPor,
-      historico: p.historico || [], cancelado: !!p.cancelado, comentarios: p.comentarios || [],
-      justificativa_urgencia: p.justificativaUrgencia || null,
-      pendente: !!p.pendente, motivo_pendencia: p.motivoPendencia || null,
-    }),
-    fromRow: (r) => ({
-      id: r.id, codigo: r.codigo, obraId: r.obra_id, titulo: r.titulo, material: r.material,
-      fotoUrl: r.foto_url, dataLancamento: r.data_lancamento, dataNecessidade: r.data_necessidade,
-      prioridade: r.prioridade, status: r.status, lancadoPor: r.lancado_por,
-      historico: r.historico || [], cancelado: !!r.cancelado, comentarios: r.comentarios || [],
-      justificativaUrgencia: r.justificativa_urgencia,
-      pendente: !!r.pendente, motivoPendencia: r.motivo_pendencia,
-      createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
-    }),
-  },
-  notifications: {
-    toRow: (n) => ({
-      id: n.id, user_name: n.userName, pedido_id: n.pedidoId || null, obra_id: n.obraId || null,
-      message: n.message, read: !!n.read,
-      created_at: new Date(n.timestamp || Date.now()).toISOString(),
-    }),
-    fromRow: (r) => ({
-      id: r.id, userName: r.user_name, pedidoId: r.pedido_id, obraId: r.obra_id,
-      message: r.message, read: !!r.read,
-      timestamp: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
-    }),
-  },
+// colunas das tabelas no Postgres (snake_case). Só listamos os
+// nomes que realmente mudam — o resto (id, nome, papel, senha,
+// codigo, titulo, material, prioridade, status, cancelado,
+// pendente, comentarios, historico, read, message...) é igual
+// nos dois lados.
+const CAMEL_TO_SNAKE = {
+  obraId: "obra_id", fotoUrl: "foto_url", dataLancamento: "data_lancamento",
+  dataNecessidade: "data_necessidade", lancadoPor: "lancado_por",
+  justificativaUrgencia: "justificativa_urgencia", motivoPendencia: "motivo_pendencia",
+  mustReset: "must_reset", responsavelCompras: "responsavel_compras",
+  perfilCliente: "perfil_cliente", createdAt: "created_at",
+  userName: "user_name", pedidoId: "pedido_id",
 };
+const SNAKE_TO_CAMEL = Object.fromEntries(Object.entries(CAMEL_TO_SNAKE).map(([k, v]) => [v, k]));
 
+function toRow(obj) {
+  const row = {};
+  for (const [k, v] of Object.entries(obj)) row[CAMEL_TO_SNAKE[k] || k] = v;
+  return row;
+}
+function fromRow(row) {
+  const obj = {};
+  for (const [k, v] of Object.entries(row)) obj[SNAKE_TO_CAMEL[k] || k] = v;
+  if (obj.createdAt) obj.createdAt = new Date(obj.createdAt).getTime();
+  return obj;
+}
+
+// Leitura de uma tabela inteira (usada só para carregar a tela
+// e para a atualização automática em segundo plano).
 export async function storageGet(key, shared = false) {
   if (!shared) return getPersonal(key);
-  const table = TABLES[key];
-  if (!table) return null;
   try {
     const { data, error } = await supabase.from(key).select("*");
     if (error) throw error;
-    return (data || []).map(table.fromRow);
+    return (data || []).map(fromRow);
   } catch (e) {
     console.error("storageGet (supabase) erro em", key, e);
     return null;
   }
 }
 
+// Usado só na primeira vez que o app roda (tabela de usuários
+// ainda vazia) para semear a equipe inicial — como a tabela está
+// vazia nesse momento, inserir em lote aqui é seguro.
 export async function storageSet(key, value, shared = false) {
   if (!shared) return setPersonal(key, value);
-  const table = TABLES[key];
-  if (!table) return false;
   try {
-    const rows = (value || []).map(table.toRow);
-    const nextIds = new Set(rows.map((r) => r.id));
-
-    const { data: existing, error: selError } = await supabase.from(key).select("id");
-    if (selError) throw selError;
-    const idsToDelete = (existing || []).map((r) => r.id).filter((id) => !nextIds.has(id));
-
-    if (idsToDelete.length > 0) {
-      const { error: delError } = await supabase.from(key).delete().in("id", idsToDelete);
-      if (delError) throw delError;
-    }
+    const rows = (value || []).map(toRow);
     if (rows.length > 0) {
-      const { error: upsertError } = await supabase.from(key).upsert(rows, { onConflict: "id" });
-      if (upsertError) throw upsertError;
+      const { error } = await supabase.from(key).insert(rows);
+      if (error) throw error;
     }
     return true;
   } catch (e) {
     console.error("storageSet (supabase) erro em", key, e);
     return false;
   }
+}
+
+// ---------- Operações linha a linha (o jeito certo de salvar) ----------
+
+export async function dbInsert(table, obj) {
+  const { error } = await supabase.from(table).insert(toRow(obj));
+  if (error) throw error;
+}
+
+export async function dbUpdate(table, id, patch) {
+  const { error } = await supabase.from(table).update(toRow(patch)).eq("id", id);
+  if (error) throw error;
+}
+
+export async function dbDelete(table, id) {
+  const { error } = await supabase.from(table).delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function dbDeleteBy(table, column, value) {
+  const { error } = await supabase.from(table).delete().eq(column, value);
+  if (error) throw error;
+}
+
+export async function dbMarkAllRead(userName) {
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read: true })
+    .eq("user_name", userName)
+    .eq("read", false);
+  if (error) throw error;
 }
 
 export async function storageRemove(key, shared = false) {
