@@ -9,7 +9,7 @@ import {
 /* ============================== STORAGE HELPERS ============================== */
 // localStorage hoje; troque src/lib/storage.js por uma versao Supabase quando estiver pronta.
 
-import { storageGet as safeGet, storageSet as safeSet } from "./lib/storage";
+import { storageGet as safeGet, storageSet as safeSet, uploadFotoPedido } from "./lib/storage";
 
 /* ============================== CONSTANTS ============================== */
 
@@ -109,13 +109,18 @@ function compressImage(file) {
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, w, h);
-        let quality = 0.62;
-        let dataUrl = canvas.toDataURL("image/jpeg", quality);
-        while (dataUrl.length > 550000 && quality > 0.3) {
-          quality -= 0.1;
-          dataUrl = canvas.toDataURL("image/jpeg", quality);
+        function tentar(qualidade) {
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) { reject(new Error("Falha ao comprimir imagem")); return; }
+              if (blob.size > 550000 && qualidade > 0.3) tentar(qualidade - 0.1);
+              else resolve(blob);
+            },
+            "image/jpeg",
+            qualidade
+          );
         }
-        resolve(dataUrl);
+        tentar(0.62);
       };
       img.onerror = () => reject(new Error("Falha ao carregar imagem"));
       img.src = e.target.result;
@@ -143,16 +148,22 @@ export default function App() {
       safeGet("pedidos", true),
       safeGet("notifications", true),
     ]);
+    // Importante: safeGet retorna null quando a busca falhou (ex.: instabilidade
+    // de rede ou limite do Supabase temporariamente excedido). Nesses casos NÃO
+    // sobrescrevemos o que já está na tela — só atualizamos quando a busca deu
+    // certo de verdade, mesmo que o resultado seja uma lista vazia.
     let usersList = u;
-    if (!usersList || usersList.length === 0) {
-      usersList = SEED_USERS;
-      await safeSet("usuarios", usersList, true);
+    if (u !== null) {
+      if (u.length === 0) {
+        usersList = SEED_USERS;
+        await safeSet("usuarios", usersList, true);
+      }
+      setUsuarios(usersList);
     }
-    setUsuarios(usersList);
-    setObras(o || []);
-    setPedidos(p || []);
-    setNotifications(n || []);
-    return usersList;
+    if (o !== null) setObras(o);
+    if (p !== null) setPedidos(p);
+    if (n !== null) setNotifications(n);
+    return usersList || [];
   }, []);
 
   useEffect(() => {
@@ -165,7 +176,7 @@ export default function App() {
   }, [loadShared]);
 
   useEffect(() => {
-    pollRef.current = setInterval(() => { loadShared(); }, 20000);
+    pollRef.current = setInterval(() => { loadShared(); }, 60000);
     return () => clearInterval(pollRef.current);
   }, [loadShared]);
 
@@ -1104,8 +1115,9 @@ function NovoPedidoModal({ obras, defaultObraId, profile, onClose, onCreate }) {
     setFotoLoading(true);
     setFotoErro("");
     try {
-      const compressed = await compressImage(file);
-      setFoto(compressed);
+      const blob = await compressImage(file);
+      const url = await uploadFotoPedido(blob);
+      setFoto(url);
     } catch (err) {
       setFotoErro("Não foi possível carregar essa imagem. Tente outra foto.");
     }
@@ -1203,8 +1215,9 @@ function EditarPedidoModal({ pedido, onClose, onSave }) {
     setFotoLoading(true);
     setFotoErro("");
     try {
-      const compressed = await compressImage(file);
-      setFoto(compressed);
+      const blob = await compressImage(file);
+      const url = await uploadFotoPedido(blob);
+      setFoto(url);
     } catch (err) {
       setFotoErro("Não foi possível carregar essa imagem. Tente outra foto.");
     }

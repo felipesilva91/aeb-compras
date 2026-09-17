@@ -132,3 +132,17 @@ export async function storageRemove(key, shared = false) {
   }
   return true;
 }
+
+// Sobe a foto (já comprimida) para o espaço de arquivos do Supabase e devolve
+// o link público — assim a tabela de pedidos guarda só um link curto, em vez
+// do texto gigante da imagem, o que evita gastar tráfego toda vez que a lista
+// de pedidos é atualizada.
+export async function uploadFotoPedido(blob) {
+  const nomeArquivo = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await supabase.storage
+    .from("fotos-pedidos")
+    .upload(nomeArquivo, blob, { contentType: "image/jpeg", upsert: false });
+  if (error) throw error;
+  const { data } = supabase.storage.from("fotos-pedidos").getPublicUrl(nomeArquivo);
+  return data.publicUrl;
+}
