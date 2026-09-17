@@ -186,6 +186,7 @@ html, body, #root { margin: 0; padding: 0; min-height: 100%; }
       .ticket.is-late { border-color: var(--red); }
       .ticket.is-cancelled { opacity: 0.62; }
       .ticket.is-cancelled .ticket-title { text-decoration: line-through; }
+      .ticket.is-pendente { border-color: var(--amber); border-width: 1.5px; }
       .ticket-perf { width: 12px; flex-shrink:0; background: var(--bg); background-image: radial-gradient(circle at 6px 8px, #fff 3.2px, transparent 3.6px); background-size: 12px 16px; border-right: 1px dashed var(--border); }
       .ticket-body { padding: 14px 15px; flex:1; min-width:0; position:relative; }
       .ticket-top { display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px; }
@@ -198,7 +199,8 @@ html, body, #root { margin: 0; padding: 0; min-height: 100%; }
       .ticket-meta em { font-style: normal; color: var(--muted); }
       .ticket-meta em.warn { color: var(--amber); font-weight:600; }
       .ticket-meta em.neg { color: var(--red); font-weight:600; }
-      .ticket-footer { display:flex; align-items:center; justify-content:space-between; padding-top: 10px; border-top: 1px dashed var(--border); }
+      .ticket-footer { display:flex; align-items:center; justify-content:space-between; padding-top: 10px; border-top: 1px dashed var(--border); gap:6px; }
+      .ticket-footer-badges { display:flex; align-items:center; gap:6px; flex-shrink:0; }
       .ticket-user { display:flex; align-items:center; gap:4px; font-size: 11.5px; color: var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
       .stamp { font-family:'Barlow Condensed', sans-serif; font-size: 10.5px; font-weight:700; text-transform:uppercase; letter-spacing: 0.6px; padding: 2px 8px; border-radius: 4px; border: 1.5px dashed; transform: rotate(-4deg); flex-shrink:0; }
@@ -212,12 +214,31 @@ html, body, #root { margin: 0; padding: 0; min-height: 100%; }
       .status-lancado { background:#EEF0F3; color:#4C5763; }
       .status-cotacao { background: var(--amber-soft); color: #9A6714; }
       .status-aprovado { background: var(--blue-soft); color: var(--navy); }
+      .status-aprovacao_cliente { background: #F0E7FA; color: #6B3FA0; }
+      .status-pendente { background: var(--amber-soft); color: #8A5A0F; }
       .status-comprado { background: #E4F0EF; color: #206C63; }
       .status-rota { background: #E7F2FF; color: #205C9A; }
       .status-entregue { background: var(--green-soft); color: #245C3F; }
       .status-cancelado { background: #ECEDF0; color: #4C5763; }
 
       .cancelado-banner { display:flex; align-items:center; gap:8px; background: var(--red-soft); color: var(--red); font-size: 12.5px; font-weight:600; padding: 10px 14px; border-radius: 9px; margin-bottom: 14px; }
+      .urgencia-banner { display:flex; align-items:flex-start; gap:9px; background: var(--amber-soft); color: #8A5A0F; font-size: 12.5px; padding: 11px 14px; border-radius: 9px; margin-bottom: 14px; }
+      .pendencia-banner { display:flex; align-items:flex-start; gap:9px; background: var(--amber-soft); color: #8A5A0F; font-size: 12.5px; padding: 11px 14px; border-radius: 9px; margin-bottom: 14px; border: 1px dashed var(--amber); }
+      .pendencia-banner strong { display:block; font-size: 12px; text-transform:uppercase; letter-spacing:0.3px; margin-bottom: 3px; }
+      .pendencia-banner p { margin:0; line-height:1.4; }
+      .pendencia-icon { color: var(--amber); }
+      .pendencia-form { background:#FBF8F1; border: 1px dashed var(--amber); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+      .pendencia-form label { display:block; font-size: 12px; font-weight:600; color: #8A5A0F; margin-bottom: 7px; }
+      .pendencia-form textarea { width:100%; border-radius: 8px; border: 1px solid var(--border); padding: 9px 11px; font-family:'Inter',sans-serif; font-size: 13px; resize: vertical; }
+      .pendencia-form-actions { display:flex; justify-content:flex-end; gap:8px; margin-top: 9px; }
+      .urgencia-banner strong { display:block; font-size: 12px; text-transform:uppercase; letter-spacing:0.3px; margin-bottom: 3px; }
+      .urgencia-banner p { margin:0; line-height:1.4; }
+      .urgencia-icon { display:inline-flex; color: var(--amber); flex-shrink:0; }
+      .ticket-top-right { display:flex; align-items:center; gap:6px; }
+      .field-hint { display:block; font-size: 11px; color: var(--muted); margin-top: 5px; font-weight:500; text-transform:none; letter-spacing:0; }
+      .field-hint.warn { color: #8A5A0F; display:flex; align-items:center; gap:5px; }
+      .obrigatorio { color: var(--red); }
+      .justificativa-textarea { border-color: var(--amber) !important; }
       .detail-actions { display:flex; align-items:center; gap:8px; margin-bottom: 16px; flex-wrap: wrap; }
       .detail-actions-excluir { padding-top: 12px; border-top: 1px dashed var(--border); }
 

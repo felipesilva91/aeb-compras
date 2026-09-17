@@ -3,7 +3,7 @@ import {
   Building2, LayoutDashboard, Bell, Plus, X, Clock, AlertTriangle, Truck,
   Search, ChevronRight, Package, LogOut, FileText, MapPin, User as UserIcon,
   Loader2, RefreshCw, Check, CalendarDays, Boxes, Users, KeyRound, ArrowLeft,
-  ShieldCheck, UserPlus, Menu, ImagePlus, Pencil, XCircle, RotateCcw, Trash2
+  ShieldCheck, UserPlus, Menu, ImagePlus, Pencil, XCircle, RotateCcw, Trash2, AlertCircle, CheckCircle2
 } from "lucide-react";
 
 /* ============================== STORAGE HELPERS ============================== */
@@ -13,9 +13,9 @@ import { storageGet as safeGet, storageSet as safeSet } from "./lib/storage";
 
 /* ============================== CONSTANTS ============================== */
 
-const STATUS = ["Lançado", "Em Cotação", "Aprovado", "Comprado", "Em Rota de Entrega", "Entregue"];
+const STATUS = ["Lançado", "Em Cotação", "Aprovação do Cliente", "Aprovado", "Comprado", "Em Rota de Entrega", "Entregue"];
 const STATUS_KEY = {
-  "Lançado": "lancado", "Em Cotação": "cotacao", "Aprovado": "aprovado",
+  "Lançado": "lancado", "Em Cotação": "cotacao", "Aprovação do Cliente": "aprovacao_cliente", "Aprovado": "aprovado",
   "Comprado": "comprado", "Em Rota de Entrega": "rota", "Entregue": "entregue",
 };
 const PRIORIDADES = ["Baixa", "Média", "Alta", "Urgente"];
@@ -59,7 +59,30 @@ function daysDiff(iso) {
   return Math.round((d1 - d2) / (1000 * 60 * 60 * 24));
 }
 
+const PRAZO_MINIMO_DIAS_UTEIS = 5;
+
+function businessDaysBetween(fromISO, toISO) {
+  const start = new Date(fromISO + "T00:00:00");
+  const end = new Date(toISO + "T00:00:00");
+  if (end <= start) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  cur.setDate(cur.getDate() + 1);
+  while (cur <= end) {
+    const dia = cur.getDay();
+    if (dia !== 0 && dia !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+function prazoEhUrgente(dataNecessidadeISO) {
+  if (!dataNecessidadeISO) return false;
+  return businessDaysBetween(todayISO(), dataNecessidadeISO) < PRAZO_MINIMO_DIAS_UTEIS;
+}
+
 function urgencyScore(p) {
+  if (p.pendente && !p.cancelado) return -1;
   if (p._atrasado) return 0;
   if (p.prioridade === "Urgente" && p.status !== "Entregue" && !p.cancelado) return 1;
   return 2;
@@ -378,18 +401,20 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
     setView({ type: "obra", id: nova.id });
   }
 
-  async function createPedido({ obraId, titulo, material, dataNecessidade, prioridade, fotoUrl }) {
+  async function createPedido({ obraId, titulo, material, dataNecessidade, prioridade, fotoUrl, justificativaUrgencia }) {
     const codigo = `#${String(pedidos.length + 1).padStart(4, "0")}`;
     const novo = {
       id: uid(), codigo, obraId, titulo, material, fotoUrl: fotoUrl || null,
       dataLancamento: todayISO(), dataNecessidade, prioridade, status: "Lançado",
       lancadoPor: profile.nome, createdAt: Date.now(),
+      justificativaUrgencia: prazoEhUrgente(dataNecessidade) ? (justificativaUrgencia || "").trim() : null,
       historico: [{ status: "Lançado", em: Date.now(), por: profile.nome }],
       comentarios: [],
     };
     await persistPedidos([...pedidos, novo]);
     setModal(null);
   }
+
 
   async function updateStatus(pedidoId, novoStatus) {
     const pedido = pedidos.find((p) => p.id === pedidoId);
@@ -436,11 +461,12 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
     setModal(null);
   }
 
-  async function updatePedido(pedidoId, { titulo, material, dataNecessidade, prioridade, fotoUrl }) {
+  async function updatePedido(pedidoId, { titulo, material, dataNecessidade, prioridade, fotoUrl, justificativaUrgencia }) {
     const next = pedidos.map((p) =>
       p.id === pedidoId
         ? {
             ...p, titulo, material, dataNecessidade, prioridade, fotoUrl: fotoUrl ?? p.fotoUrl,
+            justificativaUrgencia: prazoEhUrgente(dataNecessidade) ? (justificativaUrgencia || "").trim() : null,
             historico: [...(p.historico || []), { status: "Dados do pedido atualizados", em: Date.now(), por: profile.nome }],
           }
         : p
@@ -459,6 +485,32 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
         : p
     );
     await persistPedidos(next);
+  }
+
+  async function setPedidoPendente(pedidoId, pendente, motivo) {
+    const pedido = pedidos.find((p) => p.id === pedidoId);
+    if (!pedido) return;
+    const next = pedidos.map((p) =>
+      p.id === pedidoId
+        ? {
+            ...p, pendente, motivoPendencia: pendente ? motivo.trim() : null,
+            historico: [...(p.historico || []), { status: pendente ? `Pedido marcado como pendência: ${motivo.trim()}` : "Pendência resolvida", em: Date.now(), por: profile.nome }],
+          }
+        : p
+    );
+    await persistPedidos(next);
+
+    if (pedido.lancadoPor !== profile.nome) {
+      const obraDoPedido = obraById(pedido.obraId);
+      const notif = {
+        id: uid(), userName: pedido.lancadoPor, pedidoId, obraId: pedido.obraId,
+        message: pendente
+          ? `${pedido.titulo} — obra ${obraDoPedido?.nome || "—"}: ficou pendente (${motivo.trim()})`
+          : `${pedido.titulo} — obra ${obraDoPedido?.nome || "—"}: pendência resolvida`,
+        timestamp: Date.now(), read: false,
+      };
+      await persistNotifications([...notifications, notif]);
+    }
   }
 
   async function deletePedido(pedidoId) {
@@ -601,6 +653,8 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
           onEditar={() => setModal({ type: "editarPedido", id: modal.id })}
           onCancelar={() => setPedidoCancelado(modal.id, true)}
           onReabrir={() => setPedidoCancelado(modal.id, false)}
+          onMarcarPendente={(motivo) => setPedidoPendente(modal.id, true, motivo)}
+          onResolverPendencia={() => setPedidoPendente(modal.id, false, "")}
           onExcluir={() => deletePedido(modal.id)}
           onAddComentario={(texto) => addComentario(modal.id, texto)}
         />
@@ -818,12 +872,16 @@ function TicketCard({ pedido, obra, onClick, showObra }) {
   const pKey = PRIORIDADE_KEY[pedido.prioridade];
   const dd = daysDiff(pedido.dataNecessidade);
   return (
-    <button className={"ticket" + (pedido._atrasado ? " is-late" : "") + (pedido.cancelado ? " is-cancelled" : "")} onClick={onClick}>
+    <button className={"ticket" + (pedido._atrasado ? " is-late" : "") + (pedido.cancelado ? " is-cancelled" : "") + (pedido.pendente ? " is-pendente" : "")} onClick={onClick}>
       <div className="ticket-perf" />
       <div className="ticket-body">
         <div className="ticket-top">
           <span className="ticket-code">{pedido.codigo}</span>
-          <span className={`stamp stamp-${pKey}`}>{pedido.prioridade}</span>
+          <span className="ticket-top-right">
+            {pedido.pendente && <span className="urgencia-icon pendencia-icon" title={`Pendência: ${pedido.motivoPendencia || ""}`}><AlertCircle size={12} /></span>}
+            {pedido.justificativaUrgencia && <span className="urgencia-icon" title="Prazo abaixo do padrão — tem justificativa"><AlertTriangle size={12} /></span>}
+            <span className={`stamp stamp-${pKey}`}>{pedido.prioridade}</span>
+          </span>
         </div>
         {showObra && obra && <span className="ticket-obra-tag"><Building2 size={12} /> {obra.nome}</span>}
         <div className="ticket-main-row">
@@ -842,7 +900,10 @@ function TicketCard({ pedido, obra, onClick, showObra }) {
         </div>
         <div className="ticket-footer">
           <span className="ticket-user"><UserIcon size={13} /> {pedido.lancadoPor}</span>
-          {pedido.cancelado ? <span className="status-pill status-cancelado">Cancelado</span> : <span className={`status-pill status-${sKey}`}>{pedido.status}</span>}
+          <span className="ticket-footer-badges">
+            {pedido.pendente && !pedido.cancelado && <span className="status-pill status-pendente">Pendência</span>}
+            {pedido.cancelado ? <span className="status-pill status-cancelado">Cancelado</span> : <span className={`status-pill status-${sKey}`}>{pedido.status}</span>}
+          </span>
         </div>
         {pedido._atrasado && !pedido.cancelado && <div className="atraso-flag">ATRASADO</div>}
       </div>
@@ -1028,11 +1089,13 @@ function NovoPedidoModal({ obras, defaultObraId, profile, onClose, onCreate }) {
   const [material, setMaterial] = useState("");
   const [dataNecessidade, setDataNecessidade] = useState(todayISO());
   const [prioridade, setPrioridade] = useState("Média");
+  const [justificativaUrgencia, setJustificativaUrgencia] = useState("");
   const [foto, setFoto] = useState(null);
   const [fotoErro, setFotoErro] = useState("");
   const [fotoLoading, setFotoLoading] = useState(false);
   const fileInputRef = useRef(null);
-  const canSave = obraId && titulo.trim() && material.trim() && dataNecessidade;
+  const urgente = prazoEhUrgente(dataNecessidade);
+  const canSave = obraId && titulo.trim() && material.trim() && dataNecessidade && (!urgente || justificativaUrgencia.trim());
 
   async function handleFotoChange(e) {
     const file = e.target.files?.[0];
@@ -1066,8 +1129,23 @@ function NovoPedidoModal({ obras, defaultObraId, profile, onClose, onCreate }) {
         <div className="field"><label>Material</label><textarea rows={2} value={material} onChange={(e) => setMaterial(e.target.value)} placeholder="Ex: 40 sacos de cimento CP-II, 50kg" /></div>
         <div className="field-row">
           <div className="field"><label>Data de lançamento</label><input className="readonly-field" value={formatDate(todayISO())} disabled /></div>
-          <div className="field"><label>Necessário até</label><input type="date" value={dataNecessidade} onChange={(e) => setDataNecessidade(e.target.value)} /></div>
+          <div className="field">
+            <label>Necessário até</label>
+            <input type="date" value={dataNecessidade} onChange={(e) => setDataNecessidade(e.target.value)} />
+            <span className="field-hint">Prazo padrão: mínimo de {PRAZO_MINIMO_DIAS_UTEIS} dias úteis.</span>
+          </div>
         </div>
+        {urgente && (
+          <div className="field">
+            <label>Por que precisa antes do prazo? <span className="obrigatorio">*</span></label>
+            <textarea
+              rows={3} value={justificativaUrgencia} onChange={(e) => setJustificativaUrgencia(e.target.value)}
+              placeholder="Ex: material quebrou hoje na obra, não dava pra prever antes / cliente adiantou a etapa..."
+              className="justificativa-textarea"
+            />
+            <span className="field-hint warn"><AlertTriangle size={12} /> Esse prazo é menor que os {PRAZO_MINIMO_DIAS_UTEIS} dias úteis padrão — explique o motivo da urgência.</span>
+          </div>
+        )}
         <div className="field">
           <label>Prioridade</label>
           <div className="priority-select">
@@ -1096,7 +1174,7 @@ function NovoPedidoModal({ obras, defaultObraId, profile, onClose, onCreate }) {
       </div>
       <div className="modal-footer">
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!canSave} onClick={() => onCreate({ obraId, titulo: titulo.trim(), material: material.trim(), dataNecessidade, prioridade, fotoUrl: foto })}><Check size={16} /> Lançar Pedido</button>
+        <button className="btn btn-primary" disabled={!canSave} onClick={() => onCreate({ obraId, titulo: titulo.trim(), material: material.trim(), dataNecessidade, prioridade, fotoUrl: foto, justificativaUrgencia })}><Check size={16} /> Lançar Pedido</button>
       </div>
     </ModalShell>
   );
@@ -1109,12 +1187,14 @@ function EditarPedidoModal({ pedido, onClose, onSave }) {
   const [material, setMaterial] = useState(pedido?.material || "");
   const [dataNecessidade, setDataNecessidade] = useState(pedido?.dataNecessidade || todayISO());
   const [prioridade, setPrioridade] = useState(pedido?.prioridade || "Média");
+  const [justificativaUrgencia, setJustificativaUrgencia] = useState(pedido?.justificativaUrgencia || "");
   const [foto, setFoto] = useState(pedido?.fotoUrl || null);
   const [fotoErro, setFotoErro] = useState("");
   const [fotoLoading, setFotoLoading] = useState(false);
   const fileInputRef = useRef(null);
   if (!pedido) return null;
-  const canSave = titulo.trim() && material.trim() && dataNecessidade;
+  const urgente = prazoEhUrgente(dataNecessidade);
+  const canSave = titulo.trim() && material.trim() && dataNecessidade && (!urgente || justificativaUrgencia.trim());
 
   async function handleFotoChange(e) {
     const file = e.target.files?.[0];
@@ -1139,8 +1219,23 @@ function EditarPedidoModal({ pedido, onClose, onSave }) {
         <div className="field"><label>Material</label><textarea rows={2} value={material} onChange={(e) => setMaterial(e.target.value)} /></div>
         <div className="field-row">
           <div className="field"><label>Data de lançamento</label><input className="readonly-field" value={formatDate(pedido.dataLancamento)} disabled /></div>
-          <div className="field"><label>Necessário até</label><input type="date" value={dataNecessidade} onChange={(e) => setDataNecessidade(e.target.value)} /></div>
+          <div className="field">
+            <label>Necessário até</label>
+            <input type="date" value={dataNecessidade} onChange={(e) => setDataNecessidade(e.target.value)} />
+            <span className="field-hint">Prazo padrão: mínimo de {PRAZO_MINIMO_DIAS_UTEIS} dias úteis.</span>
+          </div>
         </div>
+        {urgente && (
+          <div className="field">
+            <label>Por que precisa antes do prazo? <span className="obrigatorio">*</span></label>
+            <textarea
+              rows={3} value={justificativaUrgencia} onChange={(e) => setJustificativaUrgencia(e.target.value)}
+              placeholder="Ex: material quebrou hoje na obra, não dava pra prever antes / cliente adiantou a etapa..."
+              className="justificativa-textarea"
+            />
+            <span className="field-hint warn"><AlertTriangle size={12} /> Esse prazo é menor que os {PRAZO_MINIMO_DIAS_UTEIS} dias úteis padrão — explique o motivo da urgência.</span>
+          </div>
+        )}
         <div className="field">
           <label>Prioridade</label>
           <div className="priority-select">
@@ -1168,7 +1263,7 @@ function EditarPedidoModal({ pedido, onClose, onSave }) {
       </div>
       <div className="modal-footer">
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave({ titulo: titulo.trim(), material: material.trim(), dataNecessidade, prioridade, fotoUrl: foto })}><Check size={16} /> Salvar alterações</button>
+        <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave({ titulo: titulo.trim(), material: material.trim(), dataNecessidade, prioridade, fotoUrl: foto, justificativaUrgencia })}><Check size={16} /> Salvar alterações</button>
       </div>
     </ModalShell>
   );
@@ -1221,15 +1316,24 @@ function TrocarSenhaModal({ onClose, onSave }) {
 
 /* ============================== PEDIDO DETAIL MODAL ============================== */
 
-function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExcluir, onClose, onUpdateStatus, onEditar, onCancelar, onReabrir, onExcluir, onAddComentario }) {
+function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExcluir, onClose, onUpdateStatus, onEditar, onCancelar, onReabrir, onMarcarPendente, onResolverPendencia, onExcluir, onAddComentario }) {
   const [confirmCancelar, setConfirmCancelar] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(false);
+  const [mostrarFormPendencia, setMostrarFormPendencia] = useState(false);
+  const [motivoPendencia, setMotivoPendencia] = useState("");
   const [novoComentario, setNovoComentario] = useState("");
   if (!pedido) return null;
   const currentIndex = STATUS.indexOf(pedido.status);
   const atrasado = isAtrasado(pedido);
-  const stepperTravado = !canUpdateStatus || pedido.cancelado;
+  const stepperTravado = !canUpdateStatus || pedido.cancelado || pedido.pendente;
   const encerrado = pedido.status === "Entregue" || pedido.cancelado;
+
+  function confirmarPendencia() {
+    if (!motivoPendencia.trim()) return;
+    onMarcarPendente(motivoPendencia);
+    setMotivoPendencia("");
+    setMostrarFormPendencia(false);
+  }
 
   function enviarComentario() {
     if (!novoComentario.trim()) return;
@@ -1241,6 +1345,47 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
     <ModalShell title={pedido.titulo} subtitle={`${pedido.codigo} · ${obra?.nome || ""}`} onClose={onClose} width="640px">
       <div className="modal-body">
         {pedido.cancelado && <div className="cancelado-banner"><XCircle size={15} /> Este pedido foi cancelado.</div>}
+
+        {pedido.pendente && (
+          <div className="pendencia-banner">
+            <AlertCircle size={15} />
+            <div>
+              <strong>Pedido com pendência</strong>
+              <p>{pedido.motivoPendencia}</p>
+            </div>
+          </div>
+        )}
+
+        {pedido.justificativaUrgencia && (
+          <div className="urgencia-banner">
+            <AlertTriangle size={15} />
+            <div>
+              <strong>Prazo abaixo do padrão — justificativa</strong>
+              <p>{pedido.justificativaUrgencia}</p>
+            </div>
+          </div>
+        )}
+
+        {canEditar && !pedido.cancelado && (
+          <div className="detail-actions">
+            {pedido.pendente ? (
+              <button className="btn btn-secondary sm" onClick={onResolverPendencia}><CheckCircle2 size={13} /> Resolver pendência</button>
+            ) : mostrarFormPendencia ? null : (
+              <button className="btn btn-secondary sm" onClick={() => setMostrarFormPendencia(true)}><AlertCircle size={13} /> Marcar pendência</button>
+            )}
+          </div>
+        )}
+
+        {mostrarFormPendencia && !pedido.pendente && (
+          <div className="pendencia-form">
+            <label>O que está faltando ou travando?</label>
+            <textarea rows={2} value={motivoPendencia} onChange={(e) => setMotivoPendencia(e.target.value)} placeholder="Ex: falta confirmar a medida certa do material com o cliente" autoFocus />
+            <div className="pendencia-form-actions">
+              <button className="btn btn-secondary sm" onClick={() => { setMostrarFormPendencia(false); setMotivoPendencia(""); }}>Cancelar</button>
+              <button className="btn btn-primary sm" disabled={!motivoPendencia.trim()} onClick={confirmarPendencia}>Marcar como pendente</button>
+            </div>
+          </div>
+        )}
 
         {canEditar && (
           <div className="detail-actions">
@@ -1297,7 +1442,7 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
                 className={"step" + (i < currentIndex ? " done" : "") + (i === currentIndex ? " active" : "") + (stepperTravado ? " locked" : "")}
                 disabled={stepperTravado}
                 onClick={() => onUpdateStatus(s)}
-                title={stepperTravado ? (pedido.cancelado ? "Reabra o pedido para alterar o status" : "Apenas o setor de compras ou a equipe de obra podem atualizar") : `Marcar como "${s}"`}
+                title={stepperTravado ? (pedido.cancelado ? "Reabra o pedido para alterar o status" : pedido.pendente ? "Resolva a pendência para alterar o status" : "Apenas o setor de compras ou a equipe de obra podem atualizar") : `Marcar como "${s}"`}
               >
                 <span className="step-dot">{i < currentIndex ? <Check size={12} /> : i + 1}</span>
                 <span className="step-label">{s}</span>
