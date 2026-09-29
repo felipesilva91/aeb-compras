@@ -3,8 +3,10 @@ import {
   Building2, LayoutDashboard, Bell, Plus, X, Clock, AlertTriangle, Truck,
   Search, ChevronRight, Package, LogOut, FileText, MapPin, User as UserIcon,
   Loader2, RefreshCw, Check, CalendarDays, Boxes, Users, KeyRound, ArrowLeft,
-  ShieldCheck, UserPlus, Menu, ImagePlus, Pencil, XCircle, RotateCcw, Trash2, AlertCircle, CheckCircle2
+  ShieldCheck, UserPlus, Menu, ImagePlus, Pencil, XCircle, RotateCcw, Trash2, AlertCircle, CheckCircle2,
+  Wallet, Copy, FileDown, Banknote
 } from "lucide-react";
+import jsPDF from "jspdf";
 
 /* ============================== STORAGE HELPERS ============================== */
 // localStorage hoje; troque src/lib/storage.js por uma versao Supabase quando estiver pronta.
@@ -81,6 +83,143 @@ function prazoEhUrgente(dataNecessidadeISO) {
   return businessDaysBetween(todayISO(), dataNecessidadeISO) < PRAZO_MINIMO_DIAS_UTEIS;
 }
 
+/* ---------- Folha de pagamento: helpers ---------- */
+
+function addDays(iso, n) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function weekEndFromStart(iso) {
+  return addDays(iso, 4); // segunda a sexta, 5 dias
+}
+function formatDateDDMM(iso) {
+  if (!iso) return "—";
+  const [, m, d] = iso.split("-");
+  return `${d}.${m}`;
+}
+function formatMoney(v) {
+  return `R$ ${Number(v || 0).toFixed(2).replace(".", ",")}`;
+}
+function formatQtd(v) {
+  const n = Number(v || 0);
+  return Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
+}
+function totalPagamento(pagamento, funcionario) {
+  if (!funcionario) return 0;
+  return (Number(pagamento.diasTrabalhados) || 0) * (Number(funcionario.valorDiaria) || 0)
+    + (Number(pagamento.horasExtras) || 0) * (Number(funcionario.valorHora) || 0);
+}
+
+function gerarTextoWhatsApp(obra, listaPagamentos, funcionarios, weekStart, weekEnd) {
+  const linhas = [];
+  linhas.push(`*Pagamento Mão de Obra – ${obra.nome}*`);
+  linhas.push(`_Semana ${formatDateDDMM(weekStart)} - ${formatDateDDMM(weekEnd)}_`);
+  linhas.push("");
+  listaPagamentos.forEach((p) => {
+    const f = funcionarios.find((x) => x.id === p.funcionarioId);
+    if (!f) return;
+    linhas.push(`> Diária: ${formatQtd(p.diasTrabalhados)} x ${formatMoney(f.valorDiaria)}`);
+    if (Number(p.horasExtras) > 0) {
+      linhas.push(`> Hora extra: ${formatQtd(p.horasExtras)}h x ${formatMoney(f.valorHora)}`);
+    }
+    linhas.push(`> Total: ${formatMoney(totalPagamento(p, f))}`);
+    linhas.push(f.nome);
+    if (f.pix) linhas.push(`Pix: ${f.pix}`);
+    if (p.observacao) linhas.push(`Obs: ${p.observacao}`);
+    linhas.push("");
+  });
+  return linhas.join("\n").trim();
+}
+
+function carregarImagemComoDataURL(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      canvas.getContext("2d").drawImage(img, 0, 0);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+async function gerarRelatorioPDF({ obras, pagamentos, funcionarios, weekStart, weekEnd }) {
+  const doc = new jsPDF();
+  try {
+    const logo = await carregarImagemComoDataURL("/logo-full.png");
+    doc.addImage(logo, "PNG", 15, 10, 45, 20);
+  } catch (e) {
+    console.error("Não foi possível carregar a logo no PDF", e);
+  }
+
+  doc.setFontSize(14);
+  doc.text(`Folha de Pagamento — Semana ${formatDateDDMM(weekStart)} a ${formatDateDDMM(weekEnd)}`, 15, 40);
+  doc.setDrawColor(200);
+  doc.line(15, 44, 195, 44);
+
+  let y = 54;
+  let totalGeral = 0;
+  const obrasComPagamento = obras
+    .map((obra) => ({
+      obra,
+      lista: pagamentos.filter((p) => p.obraId === obra.id && p.semanaInicio === weekStart && p.semanaFim === weekEnd),
+    }))
+    .filter((g) => g.lista.length > 0);
+
+  if (obrasComPagamento.length === 0) {
+    doc.setFontSize(11);
+    doc.text("Nenhum pagamento lançado para esta semana.", 15, y);
+  }
+
+  obrasComPagamento.forEach(({ obra, lista }) => {
+    if (y > 265) { doc.addPage(); y = 20; }
+    doc.setFontSize(12);
+    doc.setFont(undefined, "bold");
+    doc.text(obra.nome, 15, y);
+    doc.setFont(undefined, "normal");
+    y += 7;
+
+    let totalObra = 0;
+    lista.forEach((p) => {
+      const f = funcionarios.find((x) => x.id === p.funcionarioId);
+      if (!f) return;
+      const total = totalPagamento(p, f);
+      totalObra += total;
+      if (y > 275) { doc.addPage(); y = 20; }
+      doc.setFontSize(10);
+      const linhaHoraExtra = Number(p.horasExtras) > 0 ? ` + ${formatQtd(p.horasExtras)}h extra` : "";
+      doc.text(`${f.nome}${f.funcao ? ` (${f.funcao})` : ""} — ${formatQtd(p.diasTrabalhados)} diária(s)${linhaHoraExtra} — ${formatMoney(total)}`, 18, y);
+      y += 5.5;
+      if (f.pix) { doc.setFontSize(8.5); doc.setTextColor(110); doc.text(`Pix: ${f.pix}`, 20, y); doc.setTextColor(0); y += 4.5; }
+      if (p.observacao) { doc.setFontSize(8.5); doc.setTextColor(110); doc.text(`Obs: ${p.observacao}`, 20, y); doc.setTextColor(0); y += 4.5; }
+      y += 1.5;
+    });
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, "bold");
+    doc.text(`Total ${obra.nome}: ${formatMoney(totalObra)}`, 15, y);
+    doc.setFont(undefined, "normal");
+    y += 9;
+    totalGeral += totalObra;
+  });
+
+  if (obrasComPagamento.length > 0) {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.setDrawColor(200);
+    doc.line(15, y - 4, 195, y - 4);
+    doc.setFontSize(12);
+    doc.setFont(undefined, "bold");
+    doc.text(`Total geral da semana: ${formatMoney(totalGeral)}`, 15, y + 3);
+  }
+
+  doc.save(`folha-pagamento-${weekStart}-a-${weekEnd}.pdf`);
+}
+
 function urgencyScore(p) {
   if (p.pendente && !p.cancelado) return -1;
   if (p._atrasado) return 0;
@@ -139,14 +278,18 @@ export default function App() {
   const [obras, setObras] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [funcionarios, setFuncionarios] = useState([]);
+  const [pagamentos, setPagamentos] = useState([]);
   const pollRef = useRef(null);
 
   const loadShared = useCallback(async () => {
-    const [u, o, p, n] = await Promise.all([
+    const [u, o, p, n, f, pg] = await Promise.all([
       safeGet("usuarios", true),
       safeGet("obras", true),
       safeGet("pedidos", true),
       safeGet("notifications", true),
+      safeGet("funcionarios", true),
+      safeGet("pagamentos", true),
     ]);
     // Importante: safeGet retorna null quando a busca falhou (ex.: instabilidade
     // de rede ou limite do Supabase temporariamente excedido). Nesses casos NÃO
@@ -163,6 +306,8 @@ export default function App() {
     if (o !== null) setObras(o);
     if (p !== null) setPedidos(p);
     if (n !== null) setNotifications(n);
+    if (f !== null) setFuncionarios(f);
+    if (pg !== null) setPagamentos(pg);
     return usersList || [];
   }, []);
 
@@ -224,9 +369,13 @@ export default function App() {
         obras={obras}
         pedidos={pedidos}
         notifications={notifications}
+        funcionarios={funcionarios}
+        pagamentos={pagamentos}
         setObras={setObras}
         setPedidos={setPedidos}
         setNotifications={setNotifications}
+        setFuncionarios={setFuncionarios}
+        setPagamentos={setPagamentos}
         onUpdateUsuario={atualizarUsuario}
         onAddUsuario={adicionarUsuario}
         onRefresh={loadShared}
@@ -383,7 +532,7 @@ function LoginFlow({ usuarios, onUpdateUsuario, onLogin }) {
 
 /* ============================== WORKSPACE ============================== */
 
-function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras, setPedidos, setNotifications, onUpdateUsuario, onAddUsuario, onRefresh, onLogout }) {
+function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionarios, pagamentos, setObras, setPedidos, setNotifications, setFuncionarios, setPagamentos, onUpdateUsuario, onAddUsuario, onRefresh, onLogout }) {
   const [view, setView] = useState({ type: "dashboard" });
   const [dashFilter, setDashFilter] = useState(null);
   const [modal, setModal] = useState(null);
@@ -607,6 +756,78 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
     }
   }
 
+  /* ---------- Folha de pagamento ---------- */
+
+  async function createFuncionario({ nome, funcao, valorDiaria, valorHora, pix }) {
+    const novo = { id: uid(), nome, funcao: funcao || null, valorDiaria: Number(valorDiaria) || 0, valorHora: Number(valorHora) || 0, pix: pix || null };
+    setSaving(true);
+    try {
+      await dbInsert("funcionarios", novo);
+      setFuncionarios([...funcionarios, novo]);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateFuncionario(funcionarioId, { nome, funcao, valorDiaria, valorHora, pix }) {
+    const patch = { nome, funcao: funcao || null, valorDiaria: Number(valorDiaria) || 0, valorHora: Number(valorHora) || 0, pix: pix || null };
+    setSaving(true);
+    try {
+      await dbUpdate("funcionarios", funcionarioId, patch);
+      setFuncionarios(funcionarios.map((f) => (f.id === funcionarioId ? { ...f, ...patch } : f)));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteFuncionario(funcionarioId) {
+    setSaving(true);
+    try {
+      await dbDeleteBy("pagamentos", "funcionario_id", funcionarioId);
+      await dbDelete("funcionarios", funcionarioId);
+      setFuncionarios(funcionarios.filter((f) => f.id !== funcionarioId));
+      setPagamentos(pagamentos.filter((p) => p.funcionarioId !== funcionarioId));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createPagamento({ obraId, funcionarioId, semanaInicio, semanaFim, diasTrabalhados, horasExtras, observacao }) {
+    const novo = {
+      id: uid(), obraId, funcionarioId, semanaInicio, semanaFim,
+      diasTrabalhados: Number(diasTrabalhados) || 0, horasExtras: Number(horasExtras) || 0,
+      observacao: observacao || null, lancadoPor: profile.nome, createdAt: Date.now(),
+    };
+    setSaving(true);
+    try {
+      await dbInsert("pagamentos", novo);
+      setPagamentos([...pagamentos, novo]);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updatePagamento(pagamentoId, { diasTrabalhados, horasExtras, observacao }) {
+    const patch = { diasTrabalhados: Number(diasTrabalhados) || 0, horasExtras: Number(horasExtras) || 0, observacao: observacao || null };
+    setSaving(true);
+    try {
+      await dbUpdate("pagamentos", pagamentoId, patch);
+      setPagamentos(pagamentos.map((p) => (p.id === pagamentoId ? { ...p, ...patch } : p)));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deletePagamento(pagamentoId) {
+    setSaving(true);
+    try {
+      await dbDelete("pagamentos", pagamentoId);
+      setPagamentos(pagamentos.filter((p) => p.id !== pagamentoId));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const withComputed = (list) => list.map((p) => ({ ...p, _atrasado: isAtrasado(p) }));
 
   const dashboardPedidos = useMemo(() => {
@@ -658,13 +879,13 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
 
       <main className="main">
         <TopBar
-          title={view.type === "dashboard" ? "Painel Geral" : view.type === "usuarios" ? "Usuários" : obraById(view.id)?.nome || "Obra"}
-          subtitle={view.type === "dashboard" ? "Visão consolidada de todas as obras" : view.type === "usuarios" ? "Contas de acesso da equipe" : obraById(view.id)?.codigo}
+          title={view.type === "dashboard" ? "Painel Geral" : view.type === "usuarios" ? "Usuários" : view.type === "folha" ? "Folha de Pagamento" : obraById(view.id)?.nome || "Obra"}
+          subtitle={view.type === "dashboard" ? "Visão consolidada de todas as obras" : view.type === "usuarios" ? "Contas de acesso da equipe" : view.type === "folha" ? "Pagamentos semanais de mão de obra" : obraById(view.id)?.codigo}
           search={search} setSearch={setSearch} saving={saving} unreadCount={unreadCount}
           showNotif={showNotif} setShowNotif={setShowNotif} myNotifs={myNotifs} onMarkAllRead={markAllRead}
           onRefresh={onRefresh}
-          showSearch={view.type !== "usuarios"}
-          onNovoPedido={canCreatePedido && view.type !== "usuarios" ? () => setModal({ type: "novoPedido", obraId: view.type === "obra" ? view.id : null }) : null}
+          showSearch={view.type !== "usuarios" && view.type !== "folha"}
+          onNovoPedido={canCreatePedido && view.type !== "usuarios" && view.type !== "folha" ? () => setModal({ type: "novoPedido", obraId: view.type === "obra" ? view.id : null }) : null}
         />
 
         <div className="content">
@@ -687,6 +908,14 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, setObras,
           )}
           {view.type === "usuarios" && canManageUsers && (
             <UsersPanel usuarios={usuarios} currentUserId={profile.id} onReset={resetUserPassword} onAddUser={addUser} />
+          )}
+          {view.type === "folha" && (
+            <FolhaPagamentoPage
+              obras={obras} funcionarios={funcionarios} pagamentos={pagamentos} profile={profile}
+              canManageFuncionarios={canManageObras}
+              onCreateFuncionario={createFuncionario} onUpdateFuncionario={updateFuncionario} onDeleteFuncionario={deleteFuncionario}
+              onCreatePagamento={createPagamento} onUpdatePagamento={updatePagamento} onDeletePagamento={deletePagamento}
+            />
           )}
         </div>
       </main>
@@ -759,6 +988,9 @@ function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers
             <Users size={17} /> Usuários
           </button>
         )}
+        <button className={"nav-item" + (view.type === "folha" ? " active" : "")} onClick={() => setView({ type: "folha" })}>
+          <Wallet size={17} /> Folha de Pagamento
+        </button>
 
         <div className="nav-section-label">
           <span>Obras</span>
@@ -1555,6 +1787,309 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
             </ul>
           </div>
         )}
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ============================== FOLHA DE PAGAMENTO ============================== */
+
+function FolhaPagamentoPage({ obras, funcionarios, pagamentos, profile, canManageFuncionarios, onCreateFuncionario, onUpdateFuncionario, onDeleteFuncionario, onCreatePagamento, onUpdatePagamento, onDeletePagamento }) {
+  const [weekStart, setWeekStart] = useState(() => {
+    const hoje = new Date();
+    const diaSemana = hoje.getDay(); // 0=domingo
+    const diffParaSegunda = diaSemana === 0 ? -6 : 1 - diaSemana;
+    const segunda = new Date(hoje);
+    segunda.setDate(hoje.getDate() + diffParaSegunda);
+    return segunda.toISOString().slice(0, 10);
+  });
+  const weekEnd = weekEndFromStart(weekStart);
+
+  const [showFuncionarios, setShowFuncionarios] = useState(false);
+  const [modal, setModal] = useState(null); // { type: 'novoPagamento'|'editarPagamento'|'novoFuncionario'|'editarFuncionario', ... }
+  const [copiadoObraId, setCopiadoObraId] = useState(null);
+
+  const pagamentosDaSemana = useMemo(
+    () => pagamentos.filter((p) => p.semanaInicio === weekStart && p.semanaFim === weekEnd),
+    [pagamentos, weekStart, weekEnd]
+  );
+
+  const grupos = useMemo(() => {
+    return obras
+      .map((obra) => ({ obra, lista: pagamentosDaSemana.filter((p) => p.obraId === obra.id) }))
+      .filter((g) => g.lista.length > 0)
+      .sort((a, b) => a.obra.nome.localeCompare(b.obra.nome));
+  }, [obras, pagamentosDaSemana]);
+
+  const totalSemana = useMemo(
+    () => pagamentosDaSemana.reduce((soma, p) => soma + totalPagamento(p, funcionarios.find((f) => f.id === p.funcionarioId)), 0),
+    [pagamentosDaSemana, funcionarios]
+  );
+
+  function copiarWhatsApp(obra, lista) {
+    const texto = gerarTextoWhatsApp(obra, lista, funcionarios, weekStart, weekEnd);
+    navigator.clipboard.writeText(texto).then(() => {
+      setCopiadoObraId(obra.id);
+      setTimeout(() => setCopiadoObraId(null), 2000);
+    });
+  }
+
+  async function handleGerarPDF() {
+    await gerarRelatorioPDF({ obras, pagamentos: pagamentosDaSemana, funcionarios, weekStart, weekEnd });
+  }
+
+  return (
+    <>
+      <div className="folha-header-card">
+        <div className="folha-header-top">
+          <div className="folha-week-picker">
+            <label>Semana de trabalho</label>
+            <div className="folha-week-inputs">
+              <input type="date" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+              <span>até</span>
+              <input className="readonly-field" value={formatDate(weekEnd)} disabled />
+            </div>
+          </div>
+          <div className="folha-header-actions">
+            <button className="btn btn-secondary" onClick={() => setShowFuncionarios(true)}><Users size={16} /> Funcionários</button>
+            <button className="btn btn-secondary" onClick={handleGerarPDF}><FileDown size={16} /> Gerar Relatório PDF</button>
+            <button className="btn btn-primary" onClick={() => setModal({ type: "novoPagamento" })}><Plus size={16} /> Novo Pagamento</button>
+          </div>
+        </div>
+        {pagamentosDaSemana.length > 0 && (
+          <div className="folha-total-semana">
+            <Banknote size={15} /> Total lançado nesta semana: <strong>{formatMoney(totalSemana)}</strong>
+          </div>
+        )}
+      </div>
+
+      {funcionarios.length === 0 ? (
+        <EmptyState
+          icon={<Users size={26} />}
+          title="Nenhum funcionário cadastrado"
+          text="Cadastre os funcionários (nome, função, diária e pix) antes de lançar os pagamentos."
+          action={<button className="btn btn-primary" onClick={() => setShowFuncionarios(true)}><Plus size={16} /> Cadastrar funcionário</button>}
+        />
+      ) : grupos.length === 0 ? (
+        <EmptyState
+          icon={<Wallet size={26} />}
+          title="Nenhum pagamento lançado nesta semana"
+          text="Lance o primeiro pagamento da semana selecionada."
+          action={<button className="btn btn-primary" onClick={() => setModal({ type: "novoPagamento" })}><Plus size={16} /> Novo Pagamento</button>}
+        />
+      ) : (
+        <div className="folha-obras-grid">
+          {grupos.map(({ obra, lista }) => {
+            const totalObra = lista.reduce((soma, p) => soma + totalPagamento(p, funcionarios.find((f) => f.id === p.funcionarioId)), 0);
+            return (
+              <div key={obra.id} className="folha-obra-card">
+                <div className="folha-obra-card-head">
+                  <div>
+                    <h3>{obra.nome}</h3>
+                    <span className="folha-obra-total">{formatMoney(totalObra)}</span>
+                  </div>
+                  <button className="btn btn-secondary sm" onClick={() => copiarWhatsApp(obra, lista)}>
+                    {copiadoObraId === obra.id ? <><Check size={13} /> Copiado!</> : <><Copy size={13} /> Copiar p/ WhatsApp</>}
+                  </button>
+                </div>
+                <div className="folha-pagamentos-list">
+                  {lista.map((p) => {
+                    const f = funcionarios.find((x) => x.id === p.funcionarioId);
+                    if (!f) return null;
+                    const total = totalPagamento(p, f);
+                    const podeEditar = p.lancadoPor === profile.nome || canManageFuncionarios;
+                    return (
+                      <div key={p.id} className="folha-pagamento-item">
+                        <div className="folha-pagamento-info">
+                          <strong>{f.nome}</strong>
+                          {f.funcao && <span className="folha-funcao-tag">{f.funcao}</span>}
+                          <div className="folha-pagamento-linhas">
+                            <span>{formatQtd(p.diasTrabalhados)} diária(s) x {formatMoney(f.valorDiaria)}</span>
+                            {Number(p.horasExtras) > 0 && <span>{formatQtd(p.horasExtras)}h extra x {formatMoney(f.valorHora)}</span>}
+                            {p.observacao && <span className="folha-obs">Obs: {p.observacao}</span>}
+                          </div>
+                        </div>
+                        <div className="folha-pagamento-right">
+                          <span className="folha-pagamento-total">{formatMoney(total)}</span>
+                          {podeEditar && (
+                            <div className="folha-pagamento-acoes">
+                              <button className="icon-btn xs" title="Editar" onClick={() => setModal({ type: "editarPagamento", pagamento: p })}><Pencil size={13} /></button>
+                              <button className="icon-btn xs" title="Excluir" onClick={() => onDeletePagamento(p.id)}><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showFuncionarios && (
+        <FuncionariosModal
+          funcionarios={funcionarios} canManage={canManageFuncionarios}
+          onClose={() => setShowFuncionarios(false)}
+          onNovo={() => setModal({ type: "novoFuncionario" })}
+          onEditar={(f) => setModal({ type: "editarFuncionario", funcionario: f })}
+          onExcluir={onDeleteFuncionario}
+        />
+      )}
+
+      {modal?.type === "novoPagamento" && (
+        <PagamentoModal
+          obras={obras} funcionarios={funcionarios} weekStart={weekStart} weekEnd={weekEnd}
+          onClose={() => setModal(null)}
+          onSave={(dados) => { onCreatePagamento(dados); setModal(null); }}
+        />
+      )}
+      {modal?.type === "editarPagamento" && (
+        <PagamentoModal
+          obras={obras} funcionarios={funcionarios} weekStart={weekStart} weekEnd={weekEnd}
+          pagamento={modal.pagamento}
+          onClose={() => setModal(null)}
+          onSave={(dados) => { onUpdatePagamento(modal.pagamento.id, dados); setModal(null); }}
+        />
+      )}
+      {modal?.type === "novoFuncionario" && (
+        <FuncionarioFormModal onClose={() => setModal(null)} onSave={(dados) => { onCreateFuncionario(dados); setModal(null); }} />
+      )}
+      {modal?.type === "editarFuncionario" && (
+        <FuncionarioFormModal funcionario={modal.funcionario} onClose={() => setModal(null)} onSave={(dados) => { onUpdateFuncionario(modal.funcionario.id, dados); setModal(null); }} />
+      )}
+    </>
+  );
+}
+
+/* ============================== FUNCIONÁRIOS MODAL ============================== */
+
+function FuncionariosModal({ funcionarios, canManage, onClose, onNovo, onEditar, onExcluir }) {
+  const [confirmId, setConfirmId] = useState(null);
+
+  return (
+    <ModalShell title="Funcionários" subtitle="Cadastro de quem recebe pagamento" onClose={onClose} width="620px">
+      <div className="modal-body">
+        {canManage && (
+          <button className="btn btn-primary btn-block" onClick={onNovo} style={{ marginBottom: 16 }}>
+            <Plus size={16} /> Novo funcionário
+          </button>
+        )}
+        {funcionarios.length === 0 ? (
+          <EmptyState icon={<Users size={22} />} title="Nenhum funcionário cadastrado" text="Cadastre o primeiro funcionário pra começar a lançar pagamentos." />
+        ) : (
+          <div className="funcionarios-list">
+            {funcionarios.slice().sort((a, b) => a.nome.localeCompare(b.nome)).map((f) => (
+              <div key={f.id} className="funcionario-row">
+                <div className="funcionario-row-info">
+                  <strong>{f.nome}</strong>
+                  {f.funcao && <span className="folha-funcao-tag">{f.funcao}</span>}
+                  <span className="funcionario-valores">Diária {formatMoney(f.valorDiaria)} · Hora extra {formatMoney(f.valorHora)}</span>
+                  {f.pix && <span className="funcionario-pix">Pix: {f.pix}</span>}
+                </div>
+                {canManage && (
+                  confirmId === f.id ? (
+                    <div className="confirm-inline">
+                      <span>Excluir?</span>
+                      <button className="btn btn-secondary sm" onClick={() => setConfirmId(null)}>Não</button>
+                      <button className="btn btn-danger sm" onClick={() => { onExcluir(f.id); setConfirmId(null); }}>Sim</button>
+                    </div>
+                  ) : (
+                    <div className="funcionario-row-acoes">
+                      <button className="icon-btn xs" title="Editar" onClick={() => onEditar(f)}><Pencil size={13} /></button>
+                      <button className="icon-btn xs" title="Excluir" onClick={() => setConfirmId(f.id)}><Trash2 size={13} /></button>
+                    </div>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+function FuncionarioFormModal({ funcionario, onClose, onSave }) {
+  const [nome, setNome] = useState(funcionario?.nome || "");
+  const [funcao, setFuncao] = useState(funcionario?.funcao || "");
+  const [valorDiaria, setValorDiaria] = useState(funcionario?.valorDiaria ?? "");
+  const [valorHora, setValorHora] = useState(funcionario?.valorHora ?? "");
+  const [pix, setPix] = useState(funcionario?.pix || "");
+  const canSave = nome.trim() && valorDiaria !== "";
+
+  return (
+    <ModalShell title={funcionario ? "Editar Funcionário" : "Novo Funcionário"} onClose={onClose}>
+      <div className="modal-body">
+        <div className="field"><label>Nome</label><input autoFocus value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Ailton Sousa Silva" /></div>
+        <div className="field"><label>Função (opcional)</label><input value={funcao} onChange={(e) => setFuncao(e.target.value)} placeholder="Ex: Pedreiro, Servente, Eletricista" /></div>
+        <div className="field-row">
+          <div className="field"><label>Valor da diária</label><input type="number" min="0" step="0.01" value={valorDiaria} onChange={(e) => setValorDiaria(e.target.value)} placeholder="Ex: 160" /></div>
+          <div className="field"><label>Valor da hora extra</label><input type="number" min="0" step="0.01" value={valorHora} onChange={(e) => setValorHora(e.target.value)} placeholder="Ex: 20" /></div>
+        </div>
+        <div className="field"><label>Chave Pix (opcional)</label><input value={pix} onChange={(e) => setPix(e.target.value)} placeholder="E-mail, telefone ou chave aleatória" /></div>
+      </div>
+      <div className="modal-footer">
+        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave({ nome: nome.trim(), funcao: funcao.trim(), valorDiaria, valorHora, pix: pix.trim() })}>
+          <Check size={16} /> {funcionario ? "Salvar alterações" : "Cadastrar"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ============================== PAGAMENTO MODAL ============================== */
+
+function PagamentoModal({ obras, funcionarios, weekStart, weekEnd, pagamento, onClose, onSave }) {
+  const [obraId, setObraId] = useState(pagamento?.obraId || obras[0]?.id || "");
+  const [funcionarioId, setFuncionarioId] = useState(pagamento?.funcionarioId || funcionarios[0]?.id || "");
+  const [diasTrabalhados, setDiasTrabalhados] = useState(pagamento?.diasTrabalhados ?? 5);
+  const [horasExtras, setHorasExtras] = useState(pagamento?.horasExtras ?? 0);
+  const [observacao, setObservacao] = useState(pagamento?.observacao || "");
+  const editando = !!pagamento;
+
+  const funcionario = funcionarios.find((f) => f.id === funcionarioId);
+  const total = funcionario ? (Number(diasTrabalhados) || 0) * (Number(funcionario.valorDiaria) || 0) + (Number(horasExtras) || 0) * (Number(funcionario.valorHora) || 0) : 0;
+  const canSave = obraId && funcionarioId && diasTrabalhados !== "";
+
+  return (
+    <ModalShell title={editando ? "Editar Pagamento" : "Novo Pagamento"} subtitle={`Semana ${formatDateDDMM(weekStart)} - ${formatDateDDMM(weekEnd)}`} onClose={onClose}>
+      <div className="modal-body">
+        {!editando && (
+          <>
+            <div className="field">
+              <label>Obra</label>
+              <select value={obraId} onChange={(e) => setObraId(e.target.value)}>
+                {obras.map((o) => <option key={o.id} value={o.id}>{o.nome}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Funcionário</label>
+              <select value={funcionarioId} onChange={(e) => setFuncionarioId(e.target.value)}>
+                {funcionarios.map((f) => <option key={f.id} value={f.id}>{f.nome}{f.funcao ? ` — ${f.funcao}` : ""}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+        <div className="field-row">
+          <div className="field"><label>Dias trabalhados</label><input type="number" min="0" step="0.5" value={diasTrabalhados} onChange={(e) => setDiasTrabalhados(e.target.value)} /></div>
+          <div className="field"><label>Horas extras</label><input type="number" min="0" step="0.5" value={horasExtras} onChange={(e) => setHorasExtras(e.target.value)} /></div>
+        </div>
+        <div className="field"><label>Observação (opcional)</label><textarea rows={2} value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: falta meio período na quinta" /></div>
+        {funcionario && (
+          <div className="pagamento-total-preview">
+            <span>Total a pagar</span>
+            <strong>{formatMoney(total)}</strong>
+          </div>
+        )}
+      </div>
+      <div className="modal-footer">
+        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave({ obraId, funcionarioId, semanaInicio: weekStart, semanaFim: weekEnd, diasTrabalhados, horasExtras, observacao: observacao.trim() })}>
+          <Check size={16} /> {editando ? "Salvar alterações" : "Lançar Pagamento"}
+        </button>
       </div>
     </ModalShell>
   );
