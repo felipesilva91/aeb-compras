@@ -1942,7 +1942,7 @@ function FolhaPagamentoPage({ obras, funcionarios, pagamentos, profile, canManag
         <PagamentoModal
           obras={obras} funcionarios={funcionarios} weekStart={weekStart} weekEnd={weekEnd}
           onClose={() => setModal(null)}
-          onSave={(dados) => { onCreatePagamento(dados); setModal(null); }}
+          onSave={(dados) => onCreatePagamento(dados)}
         />
       )}
       {modal?.type === "editarPagamento" && (
@@ -1950,14 +1950,14 @@ function FolhaPagamentoPage({ obras, funcionarios, pagamentos, profile, canManag
           obras={obras} funcionarios={funcionarios} weekStart={weekStart} weekEnd={weekEnd}
           pagamento={modal.pagamento}
           onClose={() => setModal(null)}
-          onSave={(dados) => { onUpdatePagamento(modal.pagamento.id, dados); setModal(null); }}
+          onSave={(dados) => onUpdatePagamento(modal.pagamento.id, dados)}
         />
       )}
       {modal?.type === "novoFuncionario" && (
-        <FuncionarioFormModal onClose={() => setModal(null)} onSave={(dados) => { onCreateFuncionario(dados); setModal(null); }} />
+        <FuncionarioFormModal onClose={() => setModal(null)} onSave={(dados) => onCreateFuncionario(dados)} />
       )}
       {modal?.type === "editarFuncionario" && (
-        <FuncionarioFormModal funcionario={modal.funcionario} onClose={() => setModal(null)} onSave={(dados) => { onUpdateFuncionario(modal.funcionario.id, dados); setModal(null); }} />
+        <FuncionarioFormModal funcionario={modal.funcionario} onClose={() => setModal(null)} onSave={(dados) => onUpdateFuncionario(modal.funcionario.id, dados)} />
       )}
     </>
   );
@@ -2017,7 +2017,22 @@ function FuncionarioFormModal({ funcionario, onClose, onSave }) {
   const [valorDiaria, setValorDiaria] = useState(funcionario?.valorDiaria ?? "");
   const [valorHora, setValorHora] = useState(funcionario?.valorHora ?? "");
   const [pix, setPix] = useState(funcionario?.pix || "");
-  const canSave = nome.trim() && valorDiaria !== "";
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  const canSave = nome.trim() && valorDiaria !== "" && !salvando;
+
+  async function handleSalvar() {
+    setSalvando(true);
+    setErro("");
+    try {
+      await onSave({ nome: nome.trim(), funcao: funcao.trim(), valorDiaria, valorHora, pix: pix.trim() });
+      onClose();
+    } catch (e) {
+      console.error("Erro ao salvar funcionário", e);
+      setErro("Não foi possível salvar. Confira sua conexão e tente de novo.");
+      setSalvando(false);
+    }
+  }
 
   return (
     <ModalShell title={funcionario ? "Editar Funcionário" : "Novo Funcionário"} onClose={onClose}>
@@ -2029,11 +2044,12 @@ function FuncionarioFormModal({ funcionario, onClose, onSave }) {
           <div className="field"><label>Valor da hora extra</label><input type="number" min="0" step="0.01" value={valorHora} onChange={(e) => setValorHora(e.target.value)} placeholder="Ex: 20" /></div>
         </div>
         <div className="field"><label>Chave Pix (opcional)</label><input value={pix} onChange={(e) => setPix(e.target.value)} placeholder="E-mail, telefone ou chave aleatória" /></div>
+        {erro && <span className="field-error">{erro}</span>}
       </div>
       <div className="modal-footer">
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave({ nome: nome.trim(), funcao: funcao.trim(), valorDiaria, valorHora, pix: pix.trim() })}>
-          <Check size={16} /> {funcionario ? "Salvar alterações" : "Cadastrar"}
+        <button className="btn btn-primary" disabled={!canSave} onClick={handleSalvar}>
+          {salvando ? <Loader2 size={16} className="spin" /> : <Check size={16} />} {funcionario ? "Salvar alterações" : "Cadastrar"}
         </button>
       </div>
     </ModalShell>
@@ -2048,11 +2064,26 @@ function PagamentoModal({ obras, funcionarios, weekStart, weekEnd, pagamento, on
   const [diasTrabalhados, setDiasTrabalhados] = useState(pagamento?.diasTrabalhados ?? 5);
   const [horasExtras, setHorasExtras] = useState(pagamento?.horasExtras ?? 0);
   const [observacao, setObservacao] = useState(pagamento?.observacao || "");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
   const editando = !!pagamento;
 
   const funcionario = funcionarios.find((f) => f.id === funcionarioId);
   const total = funcionario ? (Number(diasTrabalhados) || 0) * (Number(funcionario.valorDiaria) || 0) + (Number(horasExtras) || 0) * (Number(funcionario.valorHora) || 0) : 0;
-  const canSave = obraId && funcionarioId && diasTrabalhados !== "";
+  const canSave = obraId && funcionarioId && diasTrabalhados !== "" && !salvando;
+
+  async function handleSalvar() {
+    setSalvando(true);
+    setErro("");
+    try {
+      await onSave({ obraId, funcionarioId, semanaInicio: weekStart, semanaFim: weekEnd, diasTrabalhados, horasExtras, observacao: observacao.trim() });
+      onClose();
+    } catch (e) {
+      console.error("Erro ao salvar pagamento", e);
+      setErro("Não foi possível salvar. Confira sua conexão e tente de novo.");
+      setSalvando(false);
+    }
+  }
 
   return (
     <ModalShell title={editando ? "Editar Pagamento" : "Novo Pagamento"} subtitle={`Semana ${formatDateDDMM(weekStart)} - ${formatDateDDMM(weekEnd)}`} onClose={onClose}>
@@ -2084,11 +2115,12 @@ function PagamentoModal({ obras, funcionarios, weekStart, weekEnd, pagamento, on
             <strong>{formatMoney(total)}</strong>
           </div>
         )}
+        {erro && <span className="field-error">{erro}</span>}
       </div>
       <div className="modal-footer">
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave({ obraId, funcionarioId, semanaInicio: weekStart, semanaFim: weekEnd, diasTrabalhados, horasExtras, observacao: observacao.trim() })}>
-          <Check size={16} /> {editando ? "Salvar alterações" : "Lançar Pagamento"}
+        <button className="btn btn-primary" disabled={!canSave} onClick={handleSalvar}>
+          {salvando ? <Loader2 size={16} className="spin" /> : <Check size={16} />} {editando ? "Salvar alterações" : "Lançar Pagamento"}
         </button>
       </div>
     </ModalShell>
