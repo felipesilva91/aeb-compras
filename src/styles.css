@@ -164,6 +164,8 @@ html, body, #root { margin: 0; padding: 0; min-height: 100%; }
 
       .obra-header-card { background: var(--surface); border:1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 20px; }
       .obra-header-top { display:flex; align-items:flex-start; justify-content:space-between; gap: 14px; flex-wrap: wrap; }
+      .obra-header-actions { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
+      .obra-excluir-hint { font-size: 11.5px; color: var(--muted); margin: 10px 0 0; }
       .obra-header-code { font-family:'IBM Plex Mono', monospace; font-size: 11px; color: var(--brick); letter-spacing: 1px; font-weight:600; }
       .obra-header-title { font-family:'Barlow Condensed', sans-serif; font-size: 24px; margin: 2px 0 6px; font-weight:700; display:flex; align-items:center; gap:9px; }
       .obra-edit-btn { background: var(--blue-soft); color: var(--blue); border:none; width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; }

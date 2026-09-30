@@ -647,6 +647,18 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
     setModal(null);
   }
 
+  async function deleteObra(obraId) {
+    setSaving(true);
+    try {
+      await dbDelete("obras", obraId);
+      setObras(obras.filter((o) => o.id !== obraId));
+    } finally {
+      setSaving(false);
+    }
+    setModal(null);
+    setView({ type: "dashboard" });
+  }
+
   async function updatePedido(pedidoId, { titulo, material, dataNecessidade, prioridade, fotoUrl, justificativaUrgencia }) {
     const pedido = pedidos.find((p) => p.id === pedidoId);
     if (!pedido) return;
@@ -904,6 +916,8 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
               onOpenPedido={(id) => setModal({ type: "pedidoDetail", id })}
               onNovoPedido={canCreatePedido ? () => setModal({ type: "novoPedido", obraId: view.id }) : null}
               onEditarObra={canManageObras ? () => setModal({ type: "editarObra", obraId: view.id }) : null}
+              onExcluirObra={canManageObras ? () => deleteObra(view.id) : null}
+              podeExcluirObra={pedidos.filter((p) => p.obraId === view.id).length === 0 && pagamentos.filter((p) => p.obraId === view.id).length === 0}
             />
           )}
           {view.type === "usuarios" && canManageUsers && (
@@ -1111,7 +1125,8 @@ function KpiCard({ icon, label, value, tone, active, onClick }) {
 
 /* ============================== OBRA PAGE ============================== */
 
-function ObraPage({ obra, pedidos, onOpenPedido, onNovoPedido, onEditarObra }) {
+function ObraPage({ obra, pedidos, onOpenPedido, onNovoPedido, onEditarObra, onExcluirObra, podeExcluirObra }) {
+  const [confirmExcluir, setConfirmExcluir] = useState(false);
   if (!obra) return <EmptyState icon={<Building2 size={26} />} title="Obra não encontrada" text="Selecione uma obra no menu lateral." />;
   const total = pedidos.length;
   const atrasados = pedidos.filter((p) => p._atrasado).length;
@@ -1136,7 +1151,27 @@ function ObraPage({ obra, pedidos, onOpenPedido, onNovoPedido, onEditarObra }) {
               {obra.responsavelCompras && <span className="obra-responsavel-tag"><ShieldCheck size={14} /> Responsável: {obra.responsavelCompras}</span>}
             </div>
           </div>
-          {onNovoPedido && <button className="btn btn-primary" onClick={onNovoPedido}><Plus size={16} /> Novo Pedido</button>}
+          <div className="obra-header-actions">
+            {onNovoPedido && <button className="btn btn-primary" onClick={onNovoPedido}><Plus size={16} /> Novo Pedido</button>}
+            {onExcluirObra && (
+              confirmExcluir ? (
+                <span className="confirm-inline">
+                  <span>Excluir esta obra pra sempre?</span>
+                  <button className="btn btn-secondary sm" onClick={() => setConfirmExcluir(false)}>Não</button>
+                  <button className="btn btn-danger sm" onClick={onExcluirObra}>Sim, excluir</button>
+                </span>
+              ) : (
+                <button
+                  className="btn btn-danger-outline"
+                  disabled={!podeExcluirObra}
+                  title={podeExcluirObra ? "Excluir obra" : "Só dá pra excluir uma obra sem nenhum pedido ou pagamento lançado nela"}
+                  onClick={() => setConfirmExcluir(true)}
+                >
+                  <Trash2 size={16} /> Excluir Obra
+                </button>
+              )
+            )}
+          </div>
         </div>
         <div className="obra-stats-row">
           <div className="obra-stat"><strong>{total}</strong><span>Pedidos no total</span></div>
@@ -1149,6 +1184,9 @@ function ObraPage({ obra, pedidos, onOpenPedido, onNovoPedido, onEditarObra }) {
             <span className="detail-label"><ShieldCheck size={12} /> Perfil do cliente</span>
             <p>{obra.perfilCliente}</p>
           </div>
+        )}
+        {!podeExcluirObra && onExcluirObra && (
+          <p className="obra-excluir-hint">Pra excluir esta obra, primeiro é preciso remover (ou já ter entregue/cancelado e apagado) todos os pedidos e pagamentos lançados nela.</p>
         )}
       </div>
 
