@@ -4,9 +4,10 @@ import {
   Search, ChevronRight, Package, LogOut, FileText, MapPin, User as UserIcon,
   Loader2, RefreshCw, Check, CalendarDays, Boxes, Users, KeyRound, ArrowLeft,
   ShieldCheck, UserPlus, Menu, ImagePlus, Pencil, XCircle, RotateCcw, Trash2, AlertCircle, CheckCircle2,
-  Wallet, Copy, FileDown, Banknote
+  Wallet, Copy, FileDown, Banknote, BarChart3
 } from "lucide-react";
 import jsPDF from "jspdf";
+import { AnalisePage } from "./Analise";
 
 /* ============================== STORAGE HELPERS ============================== */
 // localStorage hoje; troque src/lib/storage.js por uma versao Supabase quando estiver pronta.
@@ -545,6 +546,12 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
   const canUpdateStatus = profile.papel === "compras" || profile.papel === "obra";
   const canCreatePedido = profile.papel === "compras" || profile.papel === "obra";
   const canManageUsers = profile.papel === "compras" || profile.papel === "dono";
+  const canViewAnalise = profile.papel === "compras" || profile.papel === "dono";
+  const [aviso, setAviso] = useState("");
+  function mostrarAviso(msg) {
+    setAviso(msg);
+    setTimeout(() => setAviso(""), 7000);
+  }
 
   const myNotifs = useMemo(
     () => notifications.filter((n) => n.userName === profile.nome).sort((a, b) => b.timestamp - a.timestamp),
@@ -723,15 +730,39 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
   }
 
   async function deletePedido(pedidoId) {
+    const pedido = pedidos.find((p) => p.id === pedidoId);
+    if (!pedido) return;
+    const obraDoPedido = obraById(pedido.obraId);
+    // Guarda uma cópia no histórico da Análise de Compras ANTES de apagar,
+    // para o pedido continuar contando nos relatórios.
+    const arquivo = {
+      id: pedido.id, codigo: pedido.codigo, obraId: pedido.obraId, obraNome: obraDoPedido ? obraDoPedido.nome : null,
+      titulo: pedido.titulo, material: pedido.material,
+      dataLancamento: pedido.dataLancamento, dataNecessidade: pedido.dataNecessidade,
+      prioridade: pedido.prioridade, status: pedido.status, lancadoPor: pedido.lancadoPor,
+      justificativaUrgencia: pedido.justificativaUrgencia || null,
+      historico: pedido.historico || [], cancelado: !!pedido.cancelado, pendente: !!pedido.pendente,
+      motivoPendencia: pedido.motivoPendencia || null,
+      excluidoPor: profile.nome, excluidoEm: new Date().toISOString(),
+    };
     setSaving(true);
     try {
+      try {
+        await dbInsert("pedidos_excluidos", arquivo);
+      } catch (e) {
+        if (!e || e.code !== "23505") throw e; // 23505 = já estava arquivado, segue
+      }
       await dbDeleteBy("notifications", "pedido_id", pedidoId);
       await dbDelete("pedidos", pedidoId);
       setPedidos(pedidos.filter((p) => p.id !== pedidoId));
       setNotifications(notifications.filter((n) => n.pedidoId !== pedidoId));
-    } finally {
+    } catch (e) {
+      console.error("Falha ao excluir pedido", e);
+      mostrarAviso("Não foi possível excluir o pedido. Nada foi apagado. Confira a conexão e se o SQL de atualização da Análise de Compras foi rodado.");
       setSaving(false);
+      return;
     }
+    setSaving(false);
     setModal(null);
   }
 
@@ -880,7 +911,7 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
       <Sidebar
         profile={profile} obras={obras} view={view}
         setView={(v) => { setView(v); setDashFilter(null); setMobileNavOpen(false); }}
-        canManageObras={canManageObras} canManageUsers={canManageUsers}
+        canManageObras={canManageObras} canManageUsers={canManageUsers} canViewAnalise={canViewAnalise}
         onNovaObra={() => { setModal({ type: "novaObra" }); setMobileNavOpen(false); }}
         onLogout={onLogout}
         onTrocarSenha={() => { setModal({ type: "trocarSenha" }); setMobileNavOpen(false); }}
@@ -891,13 +922,13 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
 
       <main className="main">
         <TopBar
-          title={view.type === "dashboard" ? "Painel Geral" : view.type === "usuarios" ? "Usuários" : view.type === "folha" ? "Folha de Pagamento" : obraById(view.id)?.nome || "Obra"}
-          subtitle={view.type === "dashboard" ? "Visão consolidada de todas as obras" : view.type === "usuarios" ? "Contas de acesso da equipe" : view.type === "folha" ? "Pagamentos semanais de mão de obra" : obraById(view.id)?.codigo}
+          title={view.type === "dashboard" ? "Painel Geral" : view.type === "usuarios" ? "Usuários" : view.type === "folha" ? "Folha de Pagamento" : view.type === "analise" ? "Análise de Compras" : obraById(view.id)?.nome || "Obra"}
+          subtitle={view.type === "dashboard" ? "Visão consolidada de todas as obras" : view.type === "usuarios" ? "Contas de acesso da equipe" : view.type === "folha" ? "Pagamentos semanais de mão de obra" : view.type === "analise" ? "Prazos, urgências e pendências dos pedidos" : obraById(view.id)?.codigo}
           search={search} setSearch={setSearch} saving={saving} unreadCount={unreadCount}
           showNotif={showNotif} setShowNotif={setShowNotif} myNotifs={myNotifs} onMarkAllRead={markAllRead}
           onRefresh={onRefresh}
-          showSearch={view.type !== "usuarios" && view.type !== "folha"}
-          onNovoPedido={canCreatePedido && view.type !== "usuarios" && view.type !== "folha" ? () => setModal({ type: "novoPedido", obraId: view.type === "obra" ? view.id : null }) : null}
+          showSearch={view.type !== "usuarios" && view.type !== "folha" && view.type !== "analise"}
+          onNovoPedido={canCreatePedido && view.type !== "usuarios" && view.type !== "folha" && view.type !== "analise" ? () => setModal({ type: "novoPedido", obraId: view.type === "obra" ? view.id : null }) : null}
         />
 
         <div className="content">
@@ -922,6 +953,9 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
           )}
           {view.type === "usuarios" && canManageUsers && (
             <UsersPanel usuarios={usuarios} currentUserId={profile.id} onReset={resetUserPassword} onAddUser={addUser} />
+          )}
+          {view.type === "analise" && canViewAnalise && (
+            <AnalisePage pedidos={pedidos} obras={obras} profile={profile} />
           )}
           {view.type === "folha" && (
             <FolhaPagamentoPage
@@ -968,6 +1002,14 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
           onAddComentario={(texto) => addComentario(modal.id, texto)}
         />
       )}
+
+      {aviso && (
+        <div className="toast-aviso" role="alert">
+          <AlertTriangle size={16} />
+          <span>{aviso}</span>
+          <button onClick={() => setAviso("")} aria-label="Fechar aviso"><X size={14} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -984,7 +1026,7 @@ function MobileTopBar({ onOpenMenu }) {
   );
 }
 
-function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers, onNovaObra, onLogout, onTrocarSenha, mobileOpen, onCloseMobile, pedidosCountByObra }) {
+function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers, canViewAnalise, onNovaObra, onLogout, onTrocarSenha, mobileOpen, onCloseMobile, pedidosCountByObra }) {
   return (
     <aside className={"sidebar" + (mobileOpen ? " mobile-open" : "")}>
       <div className="sidebar-logo">
@@ -1005,6 +1047,11 @@ function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers
         <button className={"nav-item" + (view.type === "folha" ? " active" : "")} onClick={() => setView({ type: "folha" })}>
           <Wallet size={17} /> Folha de Pagamento
         </button>
+        {canViewAnalise && (
+          <button className={"nav-item" + (view.type === "analise" ? " active" : "")} onClick={() => setView({ type: "analise" })}>
+            <BarChart3 size={17} /> Análise de Compras
+          </button>
+        )}
 
         <div className="nav-section-label">
           <span>Obras</span>
