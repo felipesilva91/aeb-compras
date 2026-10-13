@@ -542,11 +542,11 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
   const [saving, setSaving] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const canManageObras = profile.papel === "compras";
-  const canUpdateStatus = profile.papel === "compras" || profile.papel === "obra";
-  const canCreatePedido = profile.papel === "compras" || profile.papel === "obra";
-  const canManageUsers = profile.papel === "compras" || profile.papel === "dono";
-  const canViewAnalise = profile.papel === "compras" || profile.papel === "dono";
+  const canManageObras = true; // todos os perfis podem tudo
+  const canUpdateStatus = true;
+  const canCreatePedido = true;
+  const canManageUsers = true;
+  const canViewAnalise = true;
   const [aviso, setAviso] = useState("");
   function mostrarAviso(msg) {
     setAviso(msg);
@@ -1148,7 +1148,7 @@ function Dashboard({ kpis, dashFilter, setDashFilter, pedidos, obraById, onOpenP
       </div>
 
       {obras.length === 0 ? (
-        <EmptyState icon={<Building2 size={26} />} title="Nenhuma obra cadastrada" text={canManageObras ? "Cadastre a primeira obra para começar a receber pedidos." : "Peça ao setor de compras para cadastrar a obra antes de lançar pedidos."} action={canManageObras && <button className="btn btn-primary" onClick={onNovaObra}><Plus size={16} /> Nova Obra</button>} />
+        <EmptyState icon={<Building2 size={26} />} title="Nenhuma obra cadastrada" text={canManageObras ? "Cadastre a primeira obra para começar a receber pedidos." : "Cadastre a obra antes de lançar pedidos."} action={canManageObras && <button className="btn btn-primary" onClick={onNovaObra}><Plus size={16} /> Nova Obra</button>} />
       ) : pedidos.length === 0 ? (
         <EmptyState icon={<Package size={26} />} title="Nenhum pedido encontrado" text="Ajuste os filtros ou lance um novo pedido de compra." />
       ) : (
@@ -1827,7 +1827,7 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
                 className={"step" + (i < currentIndex ? " done" : "") + (i === currentIndex ? " active" : "") + (stepperTravado ? " locked" : "")}
                 disabled={stepperTravado}
                 onClick={() => onUpdateStatus(s)}
-                title={stepperTravado ? (pedido.cancelado ? "Reabra o pedido para alterar o status" : pedido.pendente ? "Resolva a pendência para alterar o status" : "Apenas o setor de compras ou a equipe de obra podem atualizar") : `Marcar como "${s}"`}
+                title={stepperTravado ? (pedido.cancelado ? "Reabra o pedido para alterar o status" : pedido.pendente ? "Resolva a pendência para alterar o status" : "Você não pode atualizar o status") : `Marcar como "${s}"`}
               >
                 <span className="step-dot">{i < currentIndex ? <Check size={12} /> : i + 1}</span>
                 <span className="step-label">{s}</span>
@@ -1836,7 +1836,7 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
             </div>
           ))}
         </div>
-        {!canUpdateStatus && !pedido.cancelado && <p className="stepper-hint">Apenas o setor de compras ou a equipe de obra podem atualizar o status. Você recebe um aviso a cada mudança.</p>}
+        {!canUpdateStatus && !pedido.cancelado && <p className="stepper-hint">Você recebe um aviso a cada mudança de status.</p>}
 
         <div className="comentarios-block">
           <span className="detail-label">Comentários</span>
