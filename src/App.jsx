@@ -221,6 +221,83 @@ async function gerarRelatorioPDF({ obras, pagamentos, funcionarios, weekStart, w
   doc.save(`folha-pagamento-${weekStart}-a-${weekEnd}.pdf`);
 }
 
+async function gerarRelatorioUniformesPDF(funcionarios) {
+  const doc = new jsPDF();
+  try {
+    const logo = await carregarImagemComoDataURL("/logo-full.png");
+    doc.addImage(logo, "PNG", 15, 10, 45, 20);
+  } catch (e) {
+    console.error("Não foi possível carregar a logo no PDF", e);
+  }
+  const hoje = new Date().toLocaleDateString("pt-BR");
+  doc.setFontSize(14);
+  doc.text("Relatório de Bota e Camisa", 15, 40);
+  doc.setFontSize(9);
+  doc.text(`Emitido em ${hoje}`, 195, 40, { align: "right" });
+  doc.setDrawColor(0);
+  doc.line(15, 44, 195, 44);
+
+  const lista = funcionarios.slice().sort((a, b) => a.nome.localeCompare(b.nome));
+  let y = 53;
+  const cabecalho = () => {
+    doc.setFontSize(10);
+    doc.setFont(undefined, "bold");
+    doc.text("Nome", 15, y);
+    doc.text("Função", 100, y);
+    doc.text("Bota", 150, y);
+    doc.text("Camisa", 175, y);
+    doc.setFont(undefined, "normal");
+    doc.line(15, y + 2, 195, y + 2);
+    y += 8;
+  };
+  cabecalho();
+  lista.forEach((f) => {
+    if (y > 278) { doc.addPage(); y = 20; cabecalho(); }
+    doc.setFontSize(10);
+    doc.text(String(f.nome || ""), 15, y, { maxWidth: 80 });
+    doc.text(String(f.funcao || "-"), 100, y, { maxWidth: 46 });
+    doc.text(String(f.numeroBota || "-"), 150, y);
+    doc.text(String(f.tamanhoCamisa || "-"), 175, y);
+    y += 6.5;
+  });
+
+  const contar = (campo) => {
+    const m = {};
+    lista.forEach((f) => { const v = String(f[campo] || "").trim().toUpperCase(); if (v) m[v] = (m[v] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0], "pt-BR", { numeric: true }));
+  };
+  const botas = contar("numeroBota");
+  const camisas = contar("tamanhoCamisa");
+  const semBota = lista.filter((f) => !String(f.numeroBota || "").trim()).length;
+  const semCamisa = lista.filter((f) => !String(f.tamanhoCamisa || "").trim()).length;
+
+  if (y > 240) { doc.addPage(); y = 20; }
+  y += 6;
+  doc.line(15, y - 4, 195, y - 4);
+  doc.setFontSize(12);
+  doc.setFont(undefined, "bold");
+  doc.text("Resumo de quantidades", 15, y + 2);
+  doc.setFont(undefined, "normal");
+  y += 10;
+  doc.setFontSize(10);
+  const bloco = (titulo, itens, semInfo) => {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.setFont(undefined, "bold");
+    doc.text(titulo, 15, y);
+    doc.setFont(undefined, "normal");
+    y += 6;
+    const linhas = itens.length ? itens.map(([k, q]) => `${k}: ${q}`).join("   |   ") : "Nenhum informado";
+    const quebradas = doc.splitTextToSize(linhas, 175);
+    quebradas.forEach((l) => { if (y > 280) { doc.addPage(); y = 20; } doc.text(l, 18, y); y += 5.5; });
+    if (semInfo > 0) { doc.text(`Sem informação: ${semInfo}`, 18, y); y += 5.5; }
+    y += 3;
+  };
+  bloco("Botas por número", botas, semBota);
+  bloco("Camisas por tamanho", camisas, semCamisa);
+
+  doc.save(`relatorio-bota-camisa-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
 function urgencyScore(p) {
   if (p.pendente && !p.cancelado) return -1;
   if (p._atrasado) return 0;
@@ -801,8 +878,8 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
 
   /* ---------- Folha de pagamento ---------- */
 
-  async function createFuncionario({ nome, funcao, valorDiaria, valorHora, pix }) {
-    const novo = { id: uid(), nome, funcao: funcao || null, valorDiaria: Number(valorDiaria) || 0, valorHora: Number(valorHora) || 0, pix: pix || null };
+  async function createFuncionario({ nome, funcao, valorDiaria, valorHora, pix, numeroBota, tamanhoCamisa }) {
+    const novo = { id: uid(), nome, funcao: funcao || null, valorDiaria: Number(valorDiaria) || 0, valorHora: Number(valorHora) || 0, pix: pix || null, numeroBota: numeroBota || null, tamanhoCamisa: tamanhoCamisa || null };
     setSaving(true);
     try {
       await dbInsert("funcionarios", novo);
@@ -812,8 +889,8 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
     }
   }
 
-  async function updateFuncionario(funcionarioId, { nome, funcao, valorDiaria, valorHora, pix }) {
-    const patch = { nome, funcao: funcao || null, valorDiaria: Number(valorDiaria) || 0, valorHora: Number(valorHora) || 0, pix: pix || null };
+  async function updateFuncionario(funcionarioId, { nome, funcao, valorDiaria, valorHora, pix, numeroBota, tamanhoCamisa }) {
+    const patch = { nome, funcao: funcao || null, valorDiaria: Number(valorDiaria) || 0, valorHora: Number(valorHora) || 0, pix: pix || null, numeroBota: numeroBota || null, tamanhoCamisa: tamanhoCamisa || null };
     setSaving(true);
     try {
       await dbUpdate("funcionarios", funcionarioId, patch);
@@ -2057,10 +2134,13 @@ function FuncionariosModal({ funcionarios, canManage, onClose, onNovo, onEditar,
     <ModalShell title="Funcionários" subtitle="Cadastro de quem recebe pagamento" onClose={onClose} width="620px">
       <div className="modal-body">
         {canManage && (
-          <button className="btn btn-primary btn-block" onClick={onNovo} style={{ marginBottom: 16 }}>
+          <button className="btn btn-primary btn-block" onClick={onNovo} style={{ marginBottom: 10 }}>
             <Plus size={16} /> Novo funcionário
           </button>
         )}
+        <button className="btn btn-secondary btn-block" disabled={funcionarios.length === 0} onClick={() => gerarRelatorioUniformesPDF(funcionarios)} style={{ marginBottom: 16 }}>
+          <FileText size={16} /> Relatório de bota e camisa (PDF)
+        </button>
         {funcionarios.length === 0 ? (
           <EmptyState icon={<Users size={22} />} title="Nenhum funcionário cadastrado" text="Cadastre o primeiro funcionário pra começar a lançar pagamentos." />
         ) : (
@@ -2102,6 +2182,8 @@ function FuncionarioFormModal({ funcionario, onClose, onSave }) {
   const [valorDiaria, setValorDiaria] = useState(funcionario?.valorDiaria ?? "");
   const [valorHora, setValorHora] = useState(funcionario?.valorHora ?? "");
   const [pix, setPix] = useState(funcionario?.pix || "");
+  const [numeroBota, setNumeroBota] = useState(funcionario?.numeroBota || "");
+  const [tamanhoCamisa, setTamanhoCamisa] = useState(funcionario?.tamanhoCamisa || "");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const canSave = nome.trim() && valorDiaria !== "" && !salvando;
@@ -2110,7 +2192,7 @@ function FuncionarioFormModal({ funcionario, onClose, onSave }) {
     setSalvando(true);
     setErro("");
     try {
-      await onSave({ nome: nome.trim(), funcao: funcao.trim(), valorDiaria, valorHora, pix: pix.trim() });
+      await onSave({ nome: nome.trim(), funcao: funcao.trim(), valorDiaria, valorHora, pix: pix.trim(), numeroBota: String(numeroBota).trim(), tamanhoCamisa: tamanhoCamisa.trim() });
       onClose();
     } catch (e) {
       console.error("Erro ao salvar funcionário", e);
@@ -2129,6 +2211,10 @@ function FuncionarioFormModal({ funcionario, onClose, onSave }) {
           <div className="field"><label>Valor da hora extra</label><input type="number" min="0" step="0.01" value={valorHora} onChange={(e) => setValorHora(e.target.value)} placeholder="Ex: 20" /></div>
         </div>
         <div className="field"><label>Chave Pix (opcional)</label><input value={pix} onChange={(e) => setPix(e.target.value)} placeholder="E-mail, telefone ou chave aleatória" /></div>
+        <div className="field-row">
+          <div className="field"><label>Número da bota (opcional)</label><input inputMode="numeric" value={numeroBota} onChange={(e) => setNumeroBota(e.target.value)} placeholder="Ex: 42" /></div>
+          <div className="field"><label>Tamanho da camisa (opcional)</label><input value={tamanhoCamisa} onChange={(e) => setTamanhoCamisa(e.target.value)} placeholder="Ex: M, G, GG" /></div>
+        </div>
         {erro && <span className="field-error">{erro}</span>}
       </div>
       <div className="modal-footer">
