@@ -529,3 +529,43 @@ html, body, #root { margin: 0; padding: 0; min-height: 100%; }
         .an-barra-trilho { grid-column: 1; }
         .an-rosca-wrap { gap: 14px; }
       }
+
+/* ---------- Fornecedores e comparativo de preços ---------- */
+.cot-page { display:flex; flex-direction:column; gap:14px; }
+.cot-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.cot-search { flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #DEE2E8; border-radius:10px; padding:0 12px; color:#6B7480; }
+.cot-search input { flex:1; border:0; outline:0; padding:11px 0; font:inherit; background:transparent; color:#17202B; }
+.cot-list { display:flex; flex-direction:column; gap:8px; }
+.cot-forn-row { display:flex; justify-content:space-between; align-items:center; gap:12px; background:#fff; border:1px solid #DEE2E8; border-radius:12px; padding:12px 14px; flex-wrap:wrap; }
+.cot-forn-info { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.cot-forn-meta { font-size:13px; color:#6B7480; }
+.cot-forn-actions { display:flex; gap:6px; align-items:center; }
+.cot-forn-actions a.btn { text-decoration:none; display:inline-flex; align-items:center; }
+.cot-muted { color:#6B7480; font-size:13px; }
+.cot-vazio { display:flex; align-items:center; gap:12px; flex-wrap:wrap; color:#6B7480; font-size:14px; margin:6px 0; }
+.cot-vazio p { margin:0; }
+.cot-item-row { display:flex; gap:6px; align-items:center; margin:6px 0; }
+.cot-item-row input, .cot-forn-add select, .cot-in-preco { border:1px solid #DEE2E8; border-radius:8px; padding:9px 10px; font:inherit; font-size:14px; background:#fff; color:#17202B; min-width:0; }
+.cot-in-desc { flex:1; }
+.cot-in-qtd { width:84px; }
+.cot-in-un { width:64px; }
+.cot-forn-add { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+.cot-forn-add select { flex:1; min-width:180px; }
+.cot-grid-wrap { overflow-x:auto; margin-top:6px; border:1px solid #DEE2E8; border-radius:10px; }
+.cot-grid { border-collapse:collapse; width:100%; min-width:560px; font-size:14px; }
+.cot-grid th { background:#17202B; color:#fff; padding:10px; text-align:center; font-weight:600; }
+.cot-grid th.cot-th-item { text-align:left; }
+.cot-grid td { border-top:1px solid #DEE2E8; padding:6px 8px; text-align:center; vertical-align:middle; }
+.cot-td-item { text-align:left !important; min-width:160px; }
+.cot-td-qtd { white-space:nowrap; color:#6B7480; }
+.cot-th-forn { display:flex; align-items:center; justify-content:center; gap:6px; }
+.cot-th-forn button { background:transparent; border:0; color:#fff; cursor:pointer; display:flex; padding:2px; opacity:.7; }
+.cot-th-forn button:hover { opacity:1; }
+.cot-grid .cot-in-preco { width:100%; min-width:100px; }
+.cot-grid td.cot-menor { background:#17202B; }
+.cot-grid td.cot-menor .cot-in-preco { background:#17202B; color:#fff; border-color:#fff; }
+.cot-grid td.cot-menor.cot-num { color:#fff; }
+.cot-foot td { font-weight:600; background:#F7F8FA; }
+.cot-foot td:first-child { text-align:left; }
+.cot-num { white-space:nowrap; }
+.cot-total td { font-size:15px; border-top:2px solid #17202B; }

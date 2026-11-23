@@ -52,6 +52,7 @@ const CAMEL_TO_SNAKE = {
   valorDiaria: "valor_diaria", numeroBota: "numero_bota", tamanhoCamisa: "tamanho_camisa", valorHora: "valor_hora",
   funcionarioId: "funcionario_id", semanaInicio: "semana_inicio", semanaFim: "semana_fim",
   diasTrabalhados: "dias_trabalhados", horasExtras: "horas_extras",
+  itemId: "item_id", cotFornId: "cot_forn_id", fornecedorId: "fornecedor_id", precoUnitario: "preco_unitario",
   obraNome: "obra_nome", excluidoPor: "excluido_por", excluidoEm: "excluido_em",
 };
 const SNAKE_TO_CAMEL = Object.fromEntries(Object.entries(CAMEL_TO_SNAKE).map(([k, v]) => [v, k]));

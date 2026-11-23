@@ -4,10 +4,11 @@ import {
   Search, ChevronRight, Package, LogOut, FileText, MapPin, User as UserIcon,
   Loader2, RefreshCw, Check, CalendarDays, Boxes, Users, KeyRound, ArrowLeft,
   ShieldCheck, UserPlus, Menu, ImagePlus, Pencil, XCircle, RotateCcw, Trash2, AlertCircle, CheckCircle2,
-  Wallet, Copy, FileDown, Banknote, BarChart3
+  Wallet, Copy, FileDown, Banknote, BarChart3, Store
 } from "lucide-react";
 import jsPDF from "jspdf";
 import { AnalisePage } from "./Analise";
+import { FornecedoresPage, CotacaoModal, COT_VAZIO } from "./Cotacoes";
 
 /* ============================== STORAGE HELPERS ============================== */
 // localStorage hoje; troque src/lib/storage.js por uma versao Supabase quando estiver pronta.
@@ -358,16 +359,21 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [funcionarios, setFuncionarios] = useState([]);
   const [pagamentos, setPagamentos] = useState([]);
+  const [cot, setCot] = useState(COT_VAZIO);
   const pollRef = useRef(null);
 
   const loadShared = useCallback(async () => {
-    const [u, o, p, n, f, pg] = await Promise.all([
+    const [u, o, p, n, f, pg, cFo, cIt, cCf, cPr] = await Promise.all([
       safeGet("usuarios", true),
       safeGet("obras", true),
       safeGet("pedidos", true),
       safeGet("notifications", true),
       safeGet("funcionarios", true),
       safeGet("pagamentos", true),
+      safeGet("fornecedores", true),
+      safeGet("cotacao_itens", true),
+      safeGet("cotacao_fornecedores", true),
+      safeGet("cotacao_precos", true),
     ]);
     // Importante: safeGet retorna null quando a busca falhou (ex.: instabilidade
     // de rede ou limite do Supabase temporariamente excedido). Nesses casos NÃO
@@ -386,6 +392,12 @@ export default function App() {
     if (n !== null) setNotifications(n);
     if (f !== null) setFuncionarios(f);
     if (pg !== null) setPagamentos(pg);
+    setCot((atual) => ({
+      fornecedores: cFo !== null ? cFo : atual.fornecedores,
+      itens: cIt !== null ? cIt : atual.itens,
+      cotForns: cCf !== null ? cCf : atual.cotForns,
+      precos: cPr !== null ? cPr : atual.precos,
+    }));
     return usersList || [];
   }, []);
 
@@ -454,6 +466,8 @@ export default function App() {
         setNotifications={setNotifications}
         setFuncionarios={setFuncionarios}
         setPagamentos={setPagamentos}
+        cot={cot}
+        setCot={setCot}
         onUpdateUsuario={atualizarUsuario}
         onAddUsuario={adicionarUsuario}
         onRefresh={loadShared}
@@ -610,10 +624,11 @@ function LoginFlow({ usuarios, onUpdateUsuario, onLogin }) {
 
 /* ============================== WORKSPACE ============================== */
 
-function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionarios, pagamentos, setObras, setPedidos, setNotifications, setFuncionarios, setPagamentos, onUpdateUsuario, onAddUsuario, onRefresh, onLogout }) {
+function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionarios, pagamentos, setObras, setPedidos, setNotifications, setFuncionarios, setPagamentos, cot, setCot, onUpdateUsuario, onAddUsuario, onRefresh, onLogout }) {
   const [view, setView] = useState({ type: "dashboard" });
   const [dashFilter, setDashFilter] = useState(null);
   const [modal, setModal] = useState(null);
+  const [cotacaoPedidoId, setCotacaoPedidoId] = useState(null);
   const [showNotif, setShowNotif] = useState(false);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -624,6 +639,8 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
   const canCreatePedido = true;
   const canManageUsers = true;
   const canViewAnalise = true;
+  // Fornecedores e comparativos: por enquanto só o usuário Felipe
+  const canCotacoes = profile.id === "felipe";
   const [aviso, setAviso] = useState("");
   function mostrarAviso(msg) {
     setAviso(msg);
@@ -988,7 +1005,7 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
       <Sidebar
         profile={profile} obras={obras} view={view}
         setView={(v) => { setView(v); setDashFilter(null); setMobileNavOpen(false); }}
-        canManageObras={canManageObras} canManageUsers={canManageUsers} canViewAnalise={canViewAnalise}
+        canManageObras={canManageObras} canManageUsers={canManageUsers} canViewAnalise={canViewAnalise} canCotacoes={canCotacoes}
         onNovaObra={() => { setModal({ type: "novaObra" }); setMobileNavOpen(false); }}
         onLogout={onLogout}
         onTrocarSenha={() => { setModal({ type: "trocarSenha" }); setMobileNavOpen(false); }}
@@ -999,13 +1016,13 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
 
       <main className="main">
         <TopBar
-          title={view.type === "dashboard" ? "Painel Geral" : view.type === "usuarios" ? "Usuários" : view.type === "folha" ? "Folha de Pagamento" : view.type === "analise" ? "Análise de Compras" : obraById(view.id)?.nome || "Obra"}
-          subtitle={view.type === "dashboard" ? "Visão consolidada de todas as obras" : view.type === "usuarios" ? "Contas de acesso da equipe" : view.type === "folha" ? "Pagamentos semanais de mão de obra" : view.type === "analise" ? "Prazos, urgências e pendências dos pedidos" : obraById(view.id)?.codigo}
+          title={view.type === "dashboard" ? "Painel Geral" : view.type === "usuarios" ? "Usuários" : view.type === "folha" ? "Folha de Pagamento" : view.type === "analise" ? "Análise de Compras" : view.type === "fornecedores" ? "Fornecedores" : obraById(view.id)?.nome || "Obra"}
+          subtitle={view.type === "dashboard" ? "Visão consolidada de todas as obras" : view.type === "usuarios" ? "Contas de acesso da equipe" : view.type === "folha" ? "Pagamentos semanais de mão de obra" : view.type === "analise" ? "Prazos, urgências e pendências dos pedidos" : view.type === "fornecedores" ? "Cadastro de fornecedores para cotação" : obraById(view.id)?.codigo}
           search={search} setSearch={setSearch} saving={saving} unreadCount={unreadCount}
           showNotif={showNotif} setShowNotif={setShowNotif} myNotifs={myNotifs} onMarkAllRead={markAllRead}
           onRefresh={onRefresh}
-          showSearch={view.type !== "usuarios" && view.type !== "folha" && view.type !== "analise"}
-          onNovoPedido={canCreatePedido && view.type !== "usuarios" && view.type !== "folha" && view.type !== "analise" ? () => setModal({ type: "novoPedido", obraId: view.type === "obra" ? view.id : null }) : null}
+          showSearch={view.type !== "usuarios" && view.type !== "folha" && view.type !== "analise" && view.type !== "fornecedores"}
+          onNovoPedido={canCreatePedido && view.type !== "usuarios" && view.type !== "folha" && view.type !== "analise" && view.type !== "fornecedores" ? () => setModal({ type: "novoPedido", obraId: view.type === "obra" ? view.id : null }) : null}
         />
 
         <div className="content">
@@ -1033,6 +1050,9 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
           )}
           {view.type === "analise" && canViewAnalise && (
             <AnalisePage pedidos={pedidos} obras={obras} profile={profile} />
+          )}
+          {view.type === "fornecedores" && canCotacoes && (
+            <FornecedoresPage cot={cot} setCot={setCot} />
           )}
           {view.type === "folha" && (
             <FolhaPagamentoPage
@@ -1077,6 +1097,16 @@ function Workspace({ profile, usuarios, obras, pedidos, notifications, funcionar
           onResolverPendencia={() => setPedidoPendente(modal.id, false, "")}
           onExcluir={() => deletePedido(modal.id)}
           onAddComentario={(texto) => addComentario(modal.id, texto)}
+          onAbrirCotacao={canCotacoes ? () => setCotacaoPedidoId(modal.id) : null}
+        />
+      )}
+
+      {canCotacoes && cotacaoPedidoId && pedidos.find((p) => p.id === cotacaoPedidoId) && (
+        <CotacaoModal
+          pedido={pedidos.find((p) => p.id === cotacaoPedidoId)}
+          obra={obraById(pedidos.find((p) => p.id === cotacaoPedidoId)?.obraId)}
+          cot={cot} setCot={setCot}
+          onClose={() => setCotacaoPedidoId(null)}
         />
       )}
 
@@ -1103,7 +1133,7 @@ function MobileTopBar({ onOpenMenu }) {
   );
 }
 
-function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers, canViewAnalise, onNovaObra, onLogout, onTrocarSenha, mobileOpen, onCloseMobile, pedidosCountByObra }) {
+function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers, canViewAnalise, canCotacoes, onNovaObra, onLogout, onTrocarSenha, mobileOpen, onCloseMobile, pedidosCountByObra }) {
   return (
     <aside className={"sidebar" + (mobileOpen ? " mobile-open" : "")}>
       <div className="sidebar-logo">
@@ -1127,6 +1157,11 @@ function Sidebar({ profile, obras, view, setView, canManageObras, canManageUsers
         {canViewAnalise && (
           <button className={"nav-item" + (view.type === "analise" ? " active" : "")} onClick={() => setView({ type: "analise" })}>
             <BarChart3 size={17} /> Análise de Compras
+          </button>
+        )}
+        {canCotacoes && (
+          <button className={"nav-item" + (view.type === "fornecedores" ? " active" : "")} onClick={() => setView({ type: "fornecedores" })}>
+            <Store size={17} /> Fornecedores
           </button>
         )}
 
@@ -1778,7 +1813,7 @@ function TrocarSenhaModal({ onClose, onSave }) {
 
 /* ============================== PEDIDO DETAIL MODAL ============================== */
 
-function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExcluir, onClose, onUpdateStatus, onEditar, onCancelar, onReabrir, onMarcarPendente, onResolverPendencia, onExcluir, onAddComentario }) {
+function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExcluir, onClose, onUpdateStatus, onEditar, onCancelar, onReabrir, onMarcarPendente, onResolverPendencia, onExcluir, onAddComentario, onAbrirCotacao }) {
   const [confirmCancelar, setConfirmCancelar] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(false);
   const [mostrarFormPendencia, setMostrarFormPendencia] = useState(false);
@@ -1914,6 +1949,12 @@ function PedidoDetailModal({ pedido, obra, canUpdateStatus, canEditar, canExclui
           ))}
         </div>
         {!canUpdateStatus && !pedido.cancelado && <p className="stepper-hint">Você recebe um aviso a cada mudança de status.</p>}
+
+        {onAbrirCotacao && (
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 14 }} onClick={onAbrirCotacao}>
+            <Store size={16} /> Comparativo de preços
+          </button>
+        )}
 
         <div className="comentarios-block">
           <span className="detail-label">Comentários</span>
